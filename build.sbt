@@ -1,4 +1,4 @@
-name := "bcl converter"
+name := "bcl-converter"
 version := "0.1"
 
 val fver = "1.1-SNAPSHOT"

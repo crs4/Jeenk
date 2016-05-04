@@ -8,6 +8,7 @@ resolvers += Resolver.mavenLocal
 
 libraryDependencies ++= Seq(
   // -------------------------------------
+  "com.google.guava" % "guava" % "19.0" ,
   "org.apache.parquet" % "parquet-avro" % "1.8.1" ,
   "org.apache.flink" %% "flink-scala" % fver ,
   "org.apache.flink" %% "flink-clients" % fver ,

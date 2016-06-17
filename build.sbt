@@ -1,10 +1,10 @@
 name := "bcl-converter"
 version := "0.1"
 
-val fver = "1.0.3" //"1.1-SNAPSHOT"
+val fver = "1.1-SNAPSHOT" // "1.0.3"
 
 resolvers += Resolver.mavenLocal
-// resolvers += "apache-snapshot" at "https://repository.apache.org/content/repositories/snapshots/"
+resolvers += "apache-snapshot" at "https://repository.apache.org/content/repositories/snapshots/"
 
 libraryDependencies ++= Seq(
   // -------------------------------------
@@ -21,7 +21,7 @@ libraryDependencies ++= Seq(
 
 excludeDependencies ++= Seq(
   // SbtExclusionRule("", "") ,
-  // SbtExclusionRule("commons-beanutils", "*") ,
+  SbtExclusionRule("com.google.code.findbugs", "*")
   // SbtExclusionRule("org.apache.flink", "flink-shaded-hadoop2") ,
   // SbtExclusionRule("net.java.dev.jets3t", "*")
 )

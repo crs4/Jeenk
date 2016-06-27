@@ -21,6 +21,7 @@ libraryDependencies ++= Seq(
 
 excludeDependencies ++= Seq(
   // SbtExclusionRule("", "") ,
+  SbtExclusionRule("commons-beanutils", "commons-beanutils") ,
   SbtExclusionRule("com.google.code.findbugs", "*")
   // SbtExclusionRule("org.apache.flink", "flink-shaded-hadoop2") ,
   // SbtExclusionRule("net.java.dev.jets3t", "*")

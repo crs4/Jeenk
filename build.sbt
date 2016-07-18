@@ -1,10 +1,10 @@
 name := "bcl-converter"
 version := "0.1"
 
-val fver = "1.1-SNAPSHOT" // "1.0.3"
+val fver = "1.1-SNAPSHOT"
 
 resolvers += Resolver.mavenLocal
-resolvers += "apache-snapshot" at "https://repository.apache.org/content/repositories/snapshots/"
+//resolvers += "apache-snapshot" at "https://repository.apache.org/content/repositories/snapshots/"
 
 libraryDependencies ++= Seq(
   // -------------------------------------
@@ -13,6 +13,7 @@ libraryDependencies ++= Seq(
   // "" % "" % "",
   "com.google.guava" % "guava" % "19.0" ,
   // "org.apache.hadoop"  % "hadoop-common" % "2.7.2-mia" ,
+  "org.apache.flink" % "flink-shaded-hadoop2" % fver ,
   "org.apache.parquet" % "parquet-avro" % "1.8.1" ,
   "org.apache.flink" %% "flink-scala" % fver ,// % "provided" ,
   "org.apache.flink" %% "flink-clients" % fver ,// % "provided" ,
@@ -21,11 +22,11 @@ libraryDependencies ++= Seq(
 
 excludeDependencies ++= Seq(
   // SbtExclusionRule("", "") ,
+  SbtExclusionRule("org.codehaus.jackson", "*") ,
+  SbtExclusionRule("org.apache.flink", "flink-shaded-hadoop1_2.10") ,
   SbtExclusionRule("commons-beanutils", "commons-beanutils") ,
   SbtExclusionRule("com.google.code.findbugs", "*")
-  // SbtExclusionRule("org.apache.flink", "flink-shaded-hadoop2") ,
   // SbtExclusionRule("net.java.dev.jets3t", "*")
 )
 
 fork in run := true
-

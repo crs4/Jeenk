@@ -9,19 +9,30 @@ import org.apache.flink.api.common.io.OutputFormat
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.scala._
+import org.apache.flink.api.scala.hadoop.mapreduce.HadoopOutputFormat
+import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
+import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
 import org.apache.hadoop.io.compress.CompressionCodecFactory
 import org.apache.hadoop.io.compress.zlib.{ZlibCompressor, ZlibFactory}
+import org.apache.hadoop.mapreduce.Job
+import org.apache.hadoop.mapreduce.lib.output.{FileOutputFormat => MapreduceFileOutputFormat}
 import scala.collection.parallel._
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
 import scala.io.Source
 import scala.xml.{XML, Node}
+import org.seqdoop.hadoop_bam.SAMRecordWritable
+import org.apache.hadoop.io.{NullWritable, LongWritable}
+import bclconverter.bamcram.{PRQ2SAMRecord, SAM2CRAM}
+
+import cz.adamh.utils.NativeUtils
 
 import Reader.Block
+import Reader.Fout
 
-class Fout(filename : String) extends OutputFormat[Block] {
+class GZFout(filename : String) extends OutputFormat[Block] {
   var writer : OutputStream = null
   var out : FSDataOutputStream = null
   def close() = {
@@ -49,6 +60,25 @@ class Fout(filename : String) extends OutputFormat[Block] {
   }
   def writeRecord(rec : Block) = {
     writer.write(rec)
+  }
+}
+
+class NoGZFout(filename : String) extends OutputFormat[Block] {
+  var out : FSDataOutputStream = null
+  def close() = {
+    out.close
+  }
+  def configure(conf : Configuration) = {
+  }
+  def open(taskNumber : Int, numTasks : Int) = {
+    val path = new HPath(filename)
+    val fs = Reader.MyFS(path)
+    if (fs.exists(path)) 
+      fs.delete(path, true)
+    out = fs.create(path)
+  }
+  def writeRecord(rec : Block) = {
+    out.write(rec)
   }
 }
 
@@ -115,6 +145,7 @@ class RData extends Serializable{
 
 object Reader {
   type Block = Array[Byte]
+  type Fout = NoGZFout
   def MyFS(path : HPath = null) : FileSystem = {
     var fs : FileSystem = null
     val conf = new HConf
@@ -134,6 +165,7 @@ class Reader extends Serializable{
   // process tile
   def process(input : Seq[(Int, Int)]) = {
     val mFP = new Fenv
+    // mFP.env.enableCheckpointing(1000)
     mFP.env.setParallelism(rd.flinkpar)
     def procReads(input : (Int, Int)) : Seq[(DataStream[Block], OutputFormat[Block])] = {
       val (lane, tile) = input
@@ -170,7 +202,7 @@ class Reader extends Serializable{
         houts(i).keys.map{ k =>
 	  val ds = stuff(i).select(k._2).map(x => (x._2, x._3))
 	    .map(new toFQ)
-	  // .map(new delAdapter(rd.adapter.getBytes))
+	    // .map(new delAdapter(rd.adapter.getBytes))
 	    .map(new Flatter)
 	  val ho = houts(i)(k)
 	  (ds, ho)
@@ -186,7 +218,14 @@ class Reader extends Serializable{
   def PRQprocess(input : Seq[(Int, Int)]) = {
     val mFP = new Fenv
     mFP.env.setParallelism(rd.flinkpar)
-    def procReads(input : (Int, Int)) : Seq[(DataStream[Block], OutputFormat[Block])] = {
+    def writeToOF(x : (DataStream[SAMRecordWritable], String)) = {
+      val opath = new HPath(x._2)
+      val job = Job.getInstance(new HConf)
+      MapreduceFileOutputFormat.setOutputPath(job, opath)
+      val hof = new HadoopOutputFormat(new SAM2CRAM, job)
+      x._1.map((new LongWritable(123), _)).writeUsingOutputFormat(hof).setParallelism(1)
+    }
+    def procReads(input : (Int, Int)) : Seq[(DataStream[SAMRecordWritable], String)] = {
       val (lane, tile) = input
       println(s"Processing lane $lane tile $tile")
       val in = mFP.env.fromElements(input)
@@ -194,9 +233,9 @@ class Reader extends Serializable{
 
       var houts = sampleMap.filterKeys(_._1 == lane)
           .map {
-	  case (k, pref) => ((k._1, k._2) -> new Fout(f"${rd.fout}${pref}/${pref}_L${k._1}%03d_${tile}.prq"))
+	  case (k, pref) => ((k._1, k._2) -> new String(f"${rd.fout}${pref}/${pref}_L${k._1}%03d_${tile}.cram"))
         }
-      houts += (lane, rd.undet) -> new Fout(f"${rd.fout}${rd.undet}/${rd.undet}_L${lane}%03d_${tile}.prq")
+      houts += (lane, rd.undet) -> new String(f"${rd.fout}${rd.undet}/${rd.undet}_L${lane}%03d_${tile}.cram")
       val stuff = bcl
         .split {
 	input : (Block, Block, Block, Block) =>
@@ -207,14 +246,17 @@ class Reader extends Serializable{
       val output = houts.keys.map{ k =>
 	val ds = stuff.select(k._2).map(x => (x._2, x._3, x._4))
 	  .map(new PRQtoFQ)
-	  .map(new PRQFlatter)
+          // .timeWindowAll(Time.seconds(10))
+	  .countWindowAll(1024)
+	  .apply(new PRQ2SAMRecord("/home/cesco/dump/data/bam/c/chr1.fasta"))
+
 	val ho = houts(k)
 	(ds, ho)
       }.toSeq
       return output
     }
     val stuff = input.flatMap(procReads)
-    stuff.foreach(x => x._1.writeUsingOutputFormat(x._2).setParallelism(1))
+    stuff.foreach(writeToOF)
     mFP.env.execute
   }
   def readSampleNames = {
@@ -285,6 +327,13 @@ object test {
     reader.rd.setParams(param)
     reader.readSampleNames
 
+
+    def run2(what : (Int, Int)) = {
+      val w = List(what)
+      reader.PRQprocess(w)  // use PRQprocess to generate PRQ files
+    }
+
+
     def runUpTo(what : Seq[(Int, Int)]) = {
       val max = 5
       var rep = 0
@@ -296,7 +345,7 @@ object test {
 	  case e : Exception => {
 	    rep += 1
 	    if (rep == max) {
-	      println("Error: Ooops, could not recover")
+	      println("Error: Ooops, could not recover: " + e)
 	      throw new Error(s"Job caused errors for $max times, aborting")
 	    }
 	    else
@@ -307,9 +356,12 @@ object test {
     }
     
     val w = reader.getAllJobs
+    /*
     val jnum = reader.rd.jnum
     val tasks = w.sliding(jnum, jnum).map(x => Future{runUpTo(x)})
     val aggregated = Future.sequence(tasks)
     Await.result(aggregated, Duration.Inf)
+     */
+    val tasks = w.par.foreach(run2)
   }
 }

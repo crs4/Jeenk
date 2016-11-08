@@ -225,6 +225,10 @@ class Reader extends Serializable{
       val hof = new HadoopOutputFormat(new SAM2CRAM, job)
       x._1.map((new LongWritable(123), _)).writeUsingOutputFormat(hof).setParallelism(1)
     }
+    def writeText(x : (DataStream[Block], String)) = {
+      val hof = new Fout(x._2)
+      x._1.writeUsingOutputFormat(hof).setParallelism(1)
+    }
     def procReads(input : (Int, Int)) : Seq[(DataStream[SAMRecordWritable], String)] = {
       val (lane, tile) = input
       println(s"Processing lane $lane tile $tile")
@@ -246,9 +250,9 @@ class Reader extends Serializable{
       val output = houts.keys.map{ k =>
 	val ds = stuff.select(k._2).map(x => (x._2, x._3, x._4))
 	  .map(new PRQtoFQ)
-          // .timeWindowAll(Time.seconds(10))
+	  // .map(new PRQFlatter)
 	  .countWindowAll(1024)
-	  .apply(new PRQ2SAMRecord("/home/cesco/dump/data/bam/c/chr1.fasta"))
+	  .apply(new PRQ2SAMRecord("/u/cesco/dump/data/bam/c/chr1.fasta"))
 
 	val ho = houts(k)
 	(ds, ho)
@@ -260,7 +264,7 @@ class Reader extends Serializable{
     mFP.env.execute
   }
   def readSampleNames = {
-    // open runinfo.xml
+    // open SampleSheet.csv
     val path = new HPath(rd.root + "SampleSheet.csv")
     val fs = Reader.MyFS(path)
     val in = fs.open(path)
@@ -328,9 +332,9 @@ object test {
     reader.readSampleNames
 
 
-    def run2(what : (Int, Int)) = {
-      val w = List(what)
-      reader.PRQprocess(w)  // use PRQprocess to generate PRQ files
+    def run2(what : Seq[(Int, Int)]) = {
+      // val w = List(what)
+      reader.PRQprocess(what)  // use PRQprocess to generate PRQ files
     }
 
 
@@ -356,12 +360,9 @@ object test {
     }
     
     val w = reader.getAllJobs
-    /*
     val jnum = reader.rd.jnum
-    val tasks = w.sliding(jnum, jnum).map(x => Future{runUpTo(x)})
+    val tasks = w.sliding(jnum, jnum).map(x => Future{run2(x)})
     val aggregated = Future.sequence(tasks)
     Await.result(aggregated, Duration.Inf)
-     */
-    val tasks = w.par.foreach(run2)
   }
 }

@@ -3,31 +3,30 @@ package bclconverter.bclreader
 import akka.pattern.ask
 import akka.util.Timeout
 import bclconverter.Fenv
+import bclconverter.bamcram.{PRQ2SAMRecord, SAM2CRAM}
+import cz.adamh.utils.NativeUtils
 import java.io.OutputStream
 import java.util.concurrent.Executors
 import org.apache.flink.api.common.io.OutputFormat
 import org.apache.flink.api.java.utils.ParameterTool
+import org.apache.flink.api.scala.hadoop.mapreduce.HadoopOutputFormat
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.scala._
-import org.apache.flink.api.scala.hadoop.mapreduce.HadoopOutputFormat
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
 import org.apache.hadoop.io.compress.CompressionCodecFactory
 import org.apache.hadoop.io.compress.zlib.{ZlibCompressor, ZlibFactory}
+import org.apache.hadoop.io.{NullWritable, LongWritable}
 import org.apache.hadoop.mapreduce.Job
 import org.apache.hadoop.mapreduce.lib.output.{FileOutputFormat => MapreduceFileOutputFormat}
+import org.seqdoop.hadoop_bam.SAMRecordWritable
 import scala.collection.parallel._
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
 import scala.io.Source
 import scala.xml.{XML, Node}
-import org.seqdoop.hadoop_bam.SAMRecordWritable
-import org.apache.hadoop.io.{NullWritable, LongWritable}
-import bclconverter.bamcram.{PRQ2SAMRecord, SAM2CRAM}
-
-import cz.adamh.utils.NativeUtils
 
 import Reader.Block
 import Reader.Fout

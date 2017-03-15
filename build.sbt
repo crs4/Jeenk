@@ -2,10 +2,10 @@ name := "bcl-converter"
 version := "0.1"
 scalaVersion := "2.10.5" //"2.11.8"
 
-val fver = "1.1.3" //"1.2-SNAPSHOT"
+val fver = "1.1.3" //"1.2.0" //"1.3-SNAPSHOT" 
 
 resolvers += Resolver.mavenLocal
-//resolvers += "apache-snapshot" at "https://repository.apache.org/content/repositories/snapshots/"
+// resolvers += "apache-snapshot" at "https://repository.apache.org/content/repositories/snapshots/"
 
 libraryDependencies ++= Seq(
   // -------------------------------------
@@ -14,14 +14,14 @@ libraryDependencies ++= Seq(
   // "" % "" % "",
   // "junit" % "junit" % "4.12" ,
   "com.google.guava" % "guava" % "19.0" ,
-  "org.seqdoop" % "hadoop-bam" % "7.7.0" ,
+  "org.seqdoop" % "hadoop-bam" % "7.8.0" ,
   // "org.apache.hadoop"  % "hadoop-common" % "2.7.2-mia" ,
-  // "org.apache.flink" % "flink-shaded-hadoop2" % fver ,
+  // "org.apache.flink" % "flink-shaded-hadoop2" % fver , 
   "org.apache.parquet" % "parquet-avro" % "1.8.1" ,
-  "org.apache.flink" %% "flink-scala" % fver ,// % "provided" ,
-  "org.apache.flink" %% "flink-clients" % fver ,// % "provided" ,
-  "org.apache.flink" %% "flink-streaming-scala" % fver ,// % "provided"
-  "org.apache.flink" %% "flink-hadoop-compatibility" % fver // % "provided"
+  "org.apache.flink" %% "flink-hadoop-compatibility" % fver ,
+  "org.apache.flink" %% "flink-scala" % fver ,
+  "org.apache.flink" %% "flink-clients" % fver ,
+  "org.apache.flink" %% "flink-streaming-scala" % fver
 )
 
 excludeDependencies ++= Seq(

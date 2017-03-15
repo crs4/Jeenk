@@ -3,7 +3,7 @@ package bclconverter.bclreader
 import akka.pattern.ask
 import akka.util.Timeout
 import bclconverter.Fenv
-import bclconverter.bamcram.{PRQ2SAMRecord, SAM2CRAM}
+import bclconverter.bamcram.{PRQ2SAMRecord, SAM2CRAM, MySAMRecordWritable}
 import cz.adamh.utils.NativeUtils
 import java.io.OutputStream
 import java.util.concurrent.Executors
@@ -23,10 +23,12 @@ import org.apache.hadoop.mapreduce.Job
 import org.apache.hadoop.mapreduce.lib.output.{FileOutputFormat => MapreduceFileOutputFormat}
 import org.seqdoop.hadoop_bam.SAMRecordWritable
 import scala.collection.parallel._
+import scala.collection.JavaConversions._
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
 import scala.io.Source
 import scala.xml.{XML, Node}
+
 
 import Reader.Block
 import Reader.Fout
@@ -213,8 +215,8 @@ class Reader extends Serializable{
     stuff.foreach(x => x._1.writeUsingOutputFormat(x._2).setParallelism(1))
     mFP.env.execute
   }
-  // process tile, PRQ output
-  def PRQprocess(input : Seq[(Int, Int)]) = {
+  // process tile, CRAM output, PRQ as intermediate format
+  def CRAMprocess(input : Seq[(Int, Int)]) = {
     val mFP = new Fenv
     mFP.env.setParallelism(rd.flinkpar)
     def writeToOF(x : (DataStream[SAMRecordWritable], String)) = {
@@ -222,7 +224,7 @@ class Reader extends Serializable{
       val job = Job.getInstance(new HConf)
       MapreduceFileOutputFormat.setOutputPath(job, opath)
       val hof = new HadoopOutputFormat(new SAM2CRAM, job)
-      x._1.map((new LongWritable(123), _)).writeUsingOutputFormat(hof).setParallelism(1)
+      x._1.map(s => (new LongWritable(123), s)).writeUsingOutputFormat(hof).setParallelism(1)
     }
     def writeText(x : (DataStream[Block], String)) = {
       val hof = new Fout(x._2)
@@ -248,7 +250,7 @@ class Reader extends Serializable{
       }
       val output = houts.keys.map{ k =>
 	val ds = stuff.select(k._2).map(x => (x._2, x._3, x._4))
-	  .map(new PRQtoFQ)
+	  .map(new toPRQ)
 	  // .map(new PRQFlatter)
 	  .countWindowAll(1024)
 	  .apply(new PRQ2SAMRecord("/u/cesco/dump/data/bam/c/chr1.fasta"))
@@ -259,6 +261,7 @@ class Reader extends Serializable{
       return output
     }
     val stuff = input.flatMap(procReads)
+    // stuff.foreach(r => writeText((r._1.map(_.toString.getBytes), r._2)))
     stuff.foreach(writeToOF)
     mFP.env.execute
   }
@@ -321,7 +324,6 @@ object test {
   def main(args: Array[String]) {
     val propertiesFile = "conf/bclconverter.properties"
     val param = ParameterTool.fromPropertiesFile(propertiesFile)
-
     val numTasks = param.getInt("numTasks") // concurrent flink tasks to be run
     implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
     // implicit val timeout = Timeout(30 seconds)
@@ -329,38 +331,10 @@ object test {
     val reader = new Reader
     reader.rd.setParams(param)
     reader.readSampleNames
-
-
-    def run2(what : Seq[(Int, Int)]) = {
-      // val w = List(what)
-      reader.PRQprocess(what)  // use PRQprocess to generate PRQ files
-    }
-
-
-    def runUpTo(what : Seq[(Int, Int)]) = {
-      val max = 5
-      var rep = 0
-      while (rep < max) {
-	try {
-	  reader.PRQprocess(what)  // use PRQprocess to generate PRQ files
-	  rep = max
-	} catch {
-	  case e : Exception => {
-	    rep += 1
-	    if (rep == max) {
-	      println("Error: Ooops, could not recover: " + e)
-	      throw new Error(s"Job caused errors for $max times, aborting")
-	    }
-	    else
-	      println(s"Warning: Exception detected, trying to recover, attempt $rep")
-	  }
-	}
-      }
-    }
-    
+   
     val w = reader.getAllJobs
     val jnum = reader.rd.jnum
-    val tasks = w.sliding(jnum, jnum).map(x => Future{run2(x)})
+    val tasks = w.sliding(jnum, jnum).map(x => Future{reader.CRAMprocess(x)}) // use CRAMprocess to generate CRAM files
     val aggregated = Future.sequence(tasks)
     Await.result(aggregated, Duration.Inf)
   }

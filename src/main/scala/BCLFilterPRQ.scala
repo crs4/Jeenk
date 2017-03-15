@@ -11,7 +11,7 @@ import org.apache.hadoop.io.compress.{CompressionCodecFactory, CompressionInputS
 import Reader.Block
 
 
-class PRQtoFQ extends MapFunction[(Block, Block, Block), (Block, Block, Block, Block, Block)] {
+class toPRQ extends MapFunction[(Block, Block, Block), (Block, Block, Block, Block, Block)] {
   var blocksize : Int = _
   var bbin : ByteBuffer = _
   def compact(l : Long) : Int = {

@@ -28,6 +28,15 @@ object Varia {
   type PRQData = (Block, Block, Block, Block, Block)
 }
 
+class MySAMRecordWritable extends SAMRecordWritable with Serializable {
+  def writeObject(out : java.io.ObjectOutputStream) = {
+    write(out)
+  }
+  def readObject(in : java.io.ObjectInputStream) = {
+    readFields(in)
+  }
+}
+
 class MidAlignerState(opts : MyOpts) extends AlignerState(opts) {
   def this() {
     this(roba.opts)
@@ -43,21 +52,25 @@ class MidRef(s : String) extends Ref(s) {
 class MyRef(s : String) extends MidRef(s) with Serializable {
 }
 class MyOpts extends Opts with Serializable {
-  // def writeObject(out : java.io.ObjectOutputStream) = {}
-  def readObject(in : java.io.ObjectInputStream) = {
-    setShareRefMem(true)
-    setNThreads(1)
-    Rapi.init(this)
-  }
+  /*
+   * def writeObject(out : java.io.ObjectOutputStream) = {}
+   * def readObject(in : java.io.ObjectInputStream) = {}
+   */
+  // init
+  setShareRefMem(true)
+  setNThreads(roba.rapipar)
+  Rapi.init(this)
 }
 
 object roba {
+  // val propertiesFile = "conf/bclconverter.properties"
+  // val param = ParameterTool.fromPropertiesFile(propertiesFile)
+  // val rapipar = param.getInt("rapipar", 1) // internal rapi parallelism
+  val rapipar = 2
+
   val sref = "/u/cesco/dump/data/bam/c/chr1.fasta"
   RapiUtils.loadPlugin()
   val opts = new MyOpts
-  opts.setShareRefMem(true)
-  opts.setNThreads(1)
-  Rapi.init(opts) 
 }
 
 class SomeData(r : String) extends Serializable {
@@ -80,9 +93,6 @@ class SomeData(r : String) extends Serializable {
   }
   def init(r : String) = {
     opts = new MyOpts
-    opts.setShareRefMem(true)
-    opts.setNThreads(1)
-    Rapi.init(opts)
     ref = new MyRef(r)
     header = createSamHeader(ref)
     aligner = new MyAlignerState(opts)
@@ -102,7 +112,6 @@ class SomeData(r : String) extends Serializable {
   var aligner : MyAlignerState = _
   init(r)
 }
-
 
 class PRQ2SAMRecord(refPath : String) extends AllWindowFunction[PRQData, SAMRecordWritable, GlobalWindow] with Serializable {
   def alignOpToCigarElement(alnOp : AlignOp) : CigarElement = {
@@ -136,9 +145,6 @@ class PRQ2SAMRecord(refPath : String) extends AllWindowFunction[PRQData, SAMReco
 
     val b = read.getSeq
     val q = read.getQual
-    // TOGLIMI
-    if (b.size != q.size)
-      println(s"XXXXXXX ${b.size} ${q.size}")
     out.setReadString(b)
     out.setBaseQualityString(q)
 
@@ -214,7 +220,7 @@ class PRQ2SAMRecord(refPath : String) extends AllWindowFunction[PRQData, SAMReco
   var dati = new SomeData(refPath)
 }
 
-
+// Writer from SAMRecordWritable to CRAM format
 class SAM2CRAM extends KeyIgnoringCRAMOutputFormat[LongWritable] with Serializable {
   override def getRecordWriter(ctx : TaskAttemptContext) : RecordWriter[LongWritable, SAMRecordWritable] = {
     val conf = ctx.getConfiguration

@@ -219,6 +219,13 @@ class Reader extends Serializable{
   def CRAMprocess(input : Seq[(Int, Int)]) = {
     val mFP = new Fenv
     mFP.env.setParallelism(rd.flinkpar)
+    def finalizeOutput(p : String) = {
+      val opath = new HPath(p)
+      val job = Job.getInstance(new HConf)
+      MapreduceFileOutputFormat.setOutputPath(job, opath)
+      val hof = new HadoopOutputFormat(new SAM2CRAM, job)
+      hof.finalizeGlobal(1)
+    }
     def writeToOF(x : (DataStream[SAMRecordWritable], String)) = {
       val opath = new HPath(x._2)
       val job = Job.getInstance(new HConf)
@@ -264,6 +271,7 @@ class Reader extends Serializable{
     // stuff.foreach(r => writeText((r._1.map(_.toString.getBytes), r._2)))
     stuff.foreach(writeToOF)
     mFP.env.execute
+    stuff.map(_._2).foreach(finalizeOutput)
   }
   def readSampleNames = {
     // open SampleSheet.csv

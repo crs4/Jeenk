@@ -63,9 +63,6 @@ class MyOpts extends Opts with Serializable {
 }
 
 object roba {
-  // val propertiesFile = "conf/bclconverter.properties"
-  // val param = ParameterTool.fromPropertiesFile(propertiesFile)
-  // val rapipar = param.getInt("rapipar", 1) // internal rapi parallelism
   val rapipar = 2
 
   val sref = "/u/cesco/dump/data/bam/c/chr1.fasta"

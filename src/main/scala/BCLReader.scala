@@ -1,9 +1,9 @@
-package bclconverter.bclreader
+package bclconverter
 
 import akka.pattern.ask
 import akka.util.Timeout
-import bclconverter.Fenv
-import bclconverter.bamcram.{PRQ2SAMRecord, SAM2CRAM, MySAMRecordWritable}
+// import bclconverter.Fenv
+// import bclconverter.bamcram.{PRQ2SAMRecord, SAM2CRAM}
 import cz.adamh.utils.NativeUtils
 import java.io.OutputStream
 import java.util.concurrent.Executors
@@ -141,6 +141,7 @@ class RData extends Serializable{
     undet = param.get("undet", undet)
     jnum = param.getInt("jnum", jnum)
     flinkpar = param.getInt("flinkpar", flinkpar)
+    roba.rapipar = param.getInt("rapipar", roba.rapipar)
   }
 }
 
@@ -217,6 +218,7 @@ class Reader extends Serializable{
   }
   // process tile, CRAM output, PRQ as intermediate format
   def CRAMprocess(input : Seq[(Int, Int)]) = {
+    val prq2sam = new PRQ2SAMRecord(roba.sref)
     val mFP = new Fenv
     mFP.env.setParallelism(rd.flinkpar)
     def finalizeOutput(p : String) = {
@@ -258,9 +260,8 @@ class Reader extends Serializable{
       val output = houts.keys.map{ k =>
 	val ds = stuff.select(k._2).map(x => (x._2, x._3, x._4))
 	  .map(new toPRQ)
-	  // .map(new PRQFlatter)
 	  .countWindowAll(1024)
-	  .apply(new PRQ2SAMRecord("/u/cesco/dump/data/bam/c/chr1.fasta"))
+	  .apply(prq2sam)
 
 	val ho = houts(k)
 	(ds, ho)

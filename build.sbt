@@ -35,4 +35,11 @@ excludeDependencies ++= Seq(
   // SbtExclusionRule("net.java.dev.jets3t", "*")
 )
 
+assemblyMergeStrategy in assembly := {
+  case "org/seqdoop/hadoop_bam/SAMRecordWritable.class" => MergeStrategy.first
+  case x =>
+    val oldStrategy = (assemblyMergeStrategy in assembly).value
+    oldStrategy(x)
+}
+
 fork in run := true

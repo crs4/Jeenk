@@ -1,4 +1,4 @@
-package bclconverter.bclreader
+package bclconverter
 
 import java.nio.{ByteBuffer, ByteOrder}
 import org.apache.flink.api.common.functions.{MapFunction, FlatMapFunction, ReduceFunction, GroupReduceFunction}

@@ -218,9 +218,9 @@ class Reader extends Serializable{
   }
   // process tile, CRAM output, PRQ as intermediate format
   def CRAMprocess(input : Seq[(Int, Int)]) = {
-    val prq2sam = new PRQ2SAMRecord(roba.sref)
     val mFP = new Fenv
     mFP.env.setParallelism(rd.flinkpar)
+    val prq2sam = new PRQ2SAMRecord(roba.sref)
     def finalizeOutput(p : String) = {
       val opath = new HPath(p)
       val job = Job.getInstance(new HConf)
@@ -258,10 +258,13 @@ class Reader extends Serializable{
 	}
       }
       val output = houts.keys.map{ k =>
-	val ds = stuff.select(k._2).map(x => (x._2, x._3, x._4))
+	val ds0 = stuff.select(k._2).map(x => (x._2, x._3, x._4))
 	  .map(new toPRQ)
 	  .countWindowAll(1024)
+
+        val ds = ds0
 	  .apply(prq2sam)
+          .setParallelism(1)
 
 	val ho = houts(k)
 	(ds, ho)

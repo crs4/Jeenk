@@ -79,6 +79,7 @@ class SomeData(r : String) extends Serializable {
     newHeader
   }
   def init = {
+    RapiUtils.loadPlugin 
     opts = new MyOpts
     ref = new MyRef(vr)
     header = createSamHeader(ref)
@@ -202,9 +203,9 @@ class PRQ2SAMRecord(refPath : String) extends AllWindowFunction[PRQData, SAMReco
   // }
   // def writeObject(out : java.io.ObjectOutputStream) = {
   //   out.writeObject(dati)
-  // }  
+  // }
+
   // Init
-  RapiUtils.loadPlugin()
   var dati = new SomeData(refPath)
   dati.init
 }

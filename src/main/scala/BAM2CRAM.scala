@@ -1,7 +1,5 @@
 package bclconverter
 
-// import bclconverter.Fenv
-import Reader.{Block, MyFS}
 import htsjdk.samtools.{SAMProgramRecord, SAMRecord, CigarOperator, Cigar, CigarElement, SAMFileHeader, SAMSequenceRecord}
 import it.crs4.rapi.{Alignment, AlignOp, Contig, Read, Fragment, Batch, Ref, AlignerState, Rapi, RapiUtils, RapiConstants, Opts}
 import org.apache.flink.api.common.functions.{MapFunction, FlatMapFunction, ReduceFunction, GroupReduceFunction}
@@ -10,8 +8,8 @@ import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.api.scala.hadoop.mapreduce.{HadoopOutputFormat, HadoopInputFormat}
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.scala._
-import org.apache.flink.streaming.api.scala.function.AllWindowFunction
-import org.apache.flink.streaming.api.windowing.windows.{Window, GlobalWindow, TimeWindow}
+import org.apache.flink.streaming.api.scala.function.WindowFunction
+import org.apache.flink.streaming.api.windowing.windows.{Window, GlobalWindow}
 import org.apache.flink.util.Collector
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
@@ -23,10 +21,22 @@ import org.seqdoop.hadoop_bam.util.SAMHeaderReader
 import org.seqdoop.hadoop_bam.{AnySAMInputFormat, CRAMInputFormat, SAMRecordWritable, KeyIgnoringCRAMOutputFormat, KeyIgnoringCRAMRecordWriter, KeyIgnoringBAMOutputFormat, KeyIgnoringBAMRecordWriter}
 import scala.collection.JavaConversions._
 
-import Varia.PRQData
-object Varia {
-  type PRQData = (Block, Block, Block, Block, Block)
+import org.apache.flink.api.java.tuple.Tuple
+
+import bclconverter.reader.Reader.{Block, PRQData, MyFS}
+
+// Writer from SAMRecordWritable to CRAM format
+class SAM2CRAM extends KeyIgnoringCRAMOutputFormat[LongWritable] {
+  override def getRecordWriter(ctx : TaskAttemptContext) : RecordWriter[LongWritable, SAMRecordWritable] = {
+    val conf = ctx.getConfiguration
+    readSAMHeaderFrom(head, conf)
+    conf.set(CRAMInputFormat.REFERENCE_SOURCE_PATH_PROPERTY, ref)
+    super.getRecordWriter(ctx)
+  }
+  val head = new HPath("file:///u/cesco/dump/data/bam/coso.bam")
+  val ref = "file://" + roba.sref //"file:///u/cesco/dump/data/bam/c/chr1.fasta"
 }
+
 
 class MidAlignerState(opts : MyOpts) extends AlignerState(opts) {
   def this() {
@@ -49,14 +59,18 @@ class MyOpts extends Opts with Serializable {
    */
   // init
   setShareRefMem(true)
-  setNThreads(roba.rapipar)
-  Rapi.init(this)
+  // TODO: fix here
+  if (true){ //(roba.rapipar > 0){
+    println("############################ " + roba.rapipar)
+    setNThreads(roba.rapipar)
+    Rapi.init(this)
+  }
 }
 
 object roba {
   val sref = "/u/cesco/dump/data/bam/c/chr1.fasta"
   RapiUtils.loadPlugin()
-  var rapipar = 1
+  var rapipar = 10
   val opts = new MyOpts
 }
 
@@ -102,7 +116,7 @@ class SomeData(r : String) extends Serializable {
   // init(r)
 }
 
-class PRQ2SAMRecord(refPath : String) extends AllWindowFunction[PRQData, SAMRecordWritable, GlobalWindow] { // with Serializable {
+class PRQ2SAMRecord(refPath : String) extends WindowFunction[(String, PRQData), (String, SAMRecordWritable), Tuple, GlobalWindow] { // with Serializable {
   def alignOpToCigarElement(alnOp : AlignOp) : CigarElement = {
     val cigarOp = (alnOp.getType) match {
       case AlignOp.Type.Match => CigarOperator.M
@@ -181,12 +195,14 @@ class PRQ2SAMRecord(refPath : String) extends AllWindowFunction[PRQData, SAMReco
     r.set(out)
     r
   }
-  def apply(w : GlobalWindow, in : Iterable[PRQData], out : Collector[SAMRecordWritable]) = {
+  def apply(key : Tuple, w : GlobalWindow, in : Iterable[(String, PRQData)], out : Collector[(String, SAMRecordWritable)]) = {
     // insert PRQ data
+    val fn : String = key.getField(0)
     val reads = new Batch(2)
     val chr = java.nio.charset.Charset.forName("US-ASCII")
     reads.reserve(in.size << 1)
-    in.foreach{ x =>
+    in.map(_._2)
+      .foreach{ x =>
       val (h, b1, q1, b2, q2) = x
       reads.append(new String(h, chr), new String(b1, chr), new String(q1, chr), RapiConstants.QENC_SANGER)
       reads.append(new String(h, chr), new String(b2, chr), new String(q2, chr), RapiConstants.QENC_SANGER)
@@ -195,29 +211,9 @@ class PRQ2SAMRecord(refPath : String) extends AllWindowFunction[PRQData, SAMReco
     dati.aligner.alignReads(dati.ref, reads)
     reads
       .flatMap(p => toRec2(p))
-      .foreach(x => out.collect(x))
+      .foreach(x => out.collect((fn, x)))
   }
-  // Serialization
-  // def readObject(in : java.io.ObjectInputStream) = {
-  //   dati = in.readObject.asInstanceOf[SomeData]
-  // }
-  // def writeObject(out : java.io.ObjectOutputStream) = {
-  //   out.writeObject(dati)
-  // }
-
   // Init
   var dati = new SomeData(refPath)
   dati.init
-}
-
-// Writer from SAMRecordWritable to CRAM format
-class SAM2CRAM extends KeyIgnoringCRAMOutputFormat[LongWritable] {
-  override def getRecordWriter(ctx : TaskAttemptContext) : RecordWriter[LongWritable, SAMRecordWritable] = {
-    val conf = ctx.getConfiguration
-    readSAMHeaderFrom(head, conf)
-    conf.set(CRAMInputFormat.REFERENCE_SOURCE_PATH_PROPERTY, ref)
-    super.getRecordWriter(ctx)
-  }
-  val head = new HPath("file:///u/cesco/dump/data/bam/coso.bam")
-  val ref = "file://" + roba.sref //"file:///u/cesco/dump/data/bam/c/chr1.fasta"
 }

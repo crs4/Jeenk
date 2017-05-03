@@ -1,11 +1,9 @@
-package bclconverter
+package bclconverter.reader
 
 import akka.pattern.ask
 import akka.util.Timeout
-// import bclconverter.Fenv
-// import bclconverter.bamcram.{PRQ2SAMRecord, SAM2CRAM}
 import cz.adamh.utils.NativeUtils
-import java.io.OutputStream
+import java.io.{OutputStream, PrintWriter, File, FileOutputStream}
 import java.util.concurrent.Executors
 import org.apache.flink.api.common.io.OutputFormat
 import org.apache.flink.api.java.utils.ParameterTool
@@ -29,58 +27,61 @@ import scala.concurrent.{ExecutionContext, Await, Future}
 import scala.io.Source
 import scala.xml.{XML, Node}
 
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer010
+import org.apache.flink.streaming.util.serialization.KeyedSerializationSchema
+import java.util.Properties
+import com.typesafe.config.ConfigFactory
+import java.nio.ByteBuffer
+import org.apache.kafka.common.Cluster
+import org.apache.kafka.clients.producer.Partitioner
+import org.apache.kafka.common.serialization.Serializer
+import org.apache.flink.streaming.connectors.kafka.partitioner.{KafkaPartitioner, FixedPartitioner}
+import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
+import org.apache.flink.streaming.util.serialization.SimpleStringSchema
 
-import Reader.Block
-import Reader.Fout
+import Reader.{Block, PRQData}
 
-class GZFout(filename : String) extends OutputFormat[Block] {
-  var writer : OutputStream = null
-  var out : FSDataOutputStream = null
-  def close() = {
-    writer.close
-    out.close
+class MyPRQSerializer(key : String) extends KeyedSerializationSchema[PRQData] {
+  override def serializeKey(x : PRQData)  : Array[Byte] = {
+    return key.getBytes
   }
-  def configure(conf : Configuration) = {
+  def toBytes(i : Int) : Array[Byte] = {
+    ByteBuffer.allocate(4).putInt(i).array
   }
-  def open(taskNumber : Int, numTasks : Int) = {
-    val compressor = new ZlibCompressor(
-      ZlibCompressor.CompressionLevel.BEST_SPEED,
-      ZlibCompressor.CompressionStrategy.DEFAULT_STRATEGY,
-      ZlibCompressor.CompressionHeader.GZIP_FORMAT,
-      64 * 1024)
-
-    val ccf = new CompressionCodecFactory(new HConf)
-    val codec = ccf.getCodecByName("gzip")
-    val path = new HPath(filename + codec.getDefaultExtension)
-    val fs = Reader.MyFS(path)
-    if (fs.exists(path)) 
-      fs.delete(path, true)
-    out = fs.create(path)
-    
-    writer = codec.createOutputStream(out, compressor)
+  override def serializeValue(x : PRQData)  : Array[Byte] = {
+    val r = toBytes(x._1.size) ++ x._1 ++
+      toBytes(x._2.size) ++ x._2 ++
+      toBytes(x._3.size) ++ x._3 ++
+      toBytes(x._4.size) ++ x._4 ++
+      toBytes(x._5.size) ++ x._5
+    return r
   }
-  def writeRecord(rec : Block) = {
-    writer.write(rec)
+  override def getTargetTopic(x : PRQData) : String = {
+    return null
   }
 }
 
-class NoGZFout(filename : String) extends OutputFormat[Block] {
-  var out : FSDataOutputStream = null
-  def close() = {
-    out.close
+class MyPartitioner(max : Int) extends KafkaPartitioner[PRQData] {
+  var p = -1
+  override def partition(next : PRQData, serKey : Array[Byte], serVal : Array[Byte], parts : Int) : Int = {
+    p = (p + 1) % max
+    return p
   }
-  def configure(conf : Configuration) = {
+}
+
+class ProdProps(pref : String) extends Properties {
+  private val pkeys = Seq("bootstrap.servers", "acks", "compression.type", "key.serializer", "value.serializer",
+    "batch.size", "linger.ms", "request.timeout.ms").map(pref + _)
+
+  lazy val typesafeConfig = ConfigFactory.load()
+
+  pkeys.map{ key =>
+    if (typesafeConfig.hasPath(key))
+      put(key.replace(pref, ""), typesafeConfig.getString(key))
   }
-  def open(taskNumber : Int, numTasks : Int) = {
-    val path = new HPath(filename)
-    val fs = Reader.MyFS(path)
-    if (fs.exists(path)) 
-      fs.delete(path, true)
-    out = fs.create(path)
-  }
-  def writeRecord(rec : Block) = {
-    out.write(rec)
-  }
+
+  def getCustomString(key: String) = typesafeConfig.getString(key)
+  def getCustomInt(key: String) = typesafeConfig.getInt(key)
 }
 
 
@@ -131,6 +132,8 @@ class RData extends Serializable{
   var undet = "Undetermined"
   var jnum = 1
   var flinkpar = 1
+  var kafkaTopic : String = "prq"
+  var kafkaControl : String = "kcon"
   def setParams(param : ParameterTool) = {
     root = param.getRequired("root")
     fout = param.getRequired("fout")
@@ -140,14 +143,17 @@ class RData extends Serializable{
     mismatches = param.getInt("mismatches", mismatches)
     undet = param.get("undet", undet)
     jnum = param.getInt("jnum", jnum)
-    flinkpar = param.getInt("flinkpar", flinkpar)
-    roba.rapipar = param.getInt("rapipar", roba.rapipar)
+    flinkpar = param.getInt("readerflinkpar", flinkpar)
+    kafkaTopic = param.get("kafkaTopic", kafkaTopic)
+    kafkaControl = param.get("kafkaControl", kafkaControl)
   }
 }
 
 object Reader {
   type Block = Array[Byte]
-  type Fout = NoGZFout
+  type PRQData = (Block, Block, Block, Block, Block)
+  // val pw = new PrintWriter(new FileOutputStream(new File("/u/cesco/code/bclconverter/filenames.txt"), true))
+  val conProducer = new KafkaProducer[Int, String](new ProdProps("conproducer10."))
   def MyFS(path : HPath = null) : FileSystem = {
     var fs : FileSystem = null
     val conf = new HConf
@@ -161,95 +167,30 @@ object Reader {
   }
 }
 
-class Reader extends Serializable{
+class Reader() extends Serializable {
   val rd = new RData
+  // var filenames = List[String]()
   var sampleMap = Map[(Int, String), String]()
-  // process tile
-  def process(input : Seq[(Int, Int)]) = {
-    val mFP = new Fenv
-    // mFP.env.enableCheckpointing(1000)
-    mFP.env.setParallelism(rd.flinkpar)
-    def procReads(input : (Int, Int)) : Seq[(DataStream[Block], OutputFormat[Block])] = {
+  // processes tile and produces PRQ
+  def BCLprocess(input : Seq[(Int, Int)]) = {
+    val jid = input.head._1 * 10000 + input.head._2
+    val FP = StreamExecutionEnvironment.getExecutionEnvironment
+    FP.setParallelism(rd.flinkpar)
+    def procReads(input : (Int, Int)) : Seq[(DataStream[PRQData], String)] = {
       val (lane, tile) = input
       println(s"Processing lane $lane tile $tile")
-      val in = mFP.env.fromElements(input)
-      val bcl = in.flatMap(new readBCL(rd)).split{
-        input : (Block, Int, Block, Block) =>
-        (input._2) match {
-          case 0 => List("R1")
-          case 1 => List("R2")
-        }
-      }
-      val rreads = Array("R1", "R2")
-      var houts = rreads.map{ rr =>
-        sampleMap.filterKeys(_._1 == lane)
-          .map {
-	  case (k, pref) => ((k._1, k._2) -> new Fout(f"${rd.fout}${pref}/${pref}_L${k._1}%03d_${tile}-${rr}.fastq"))
-        }
-      }
-      rreads.indices.foreach{
-        i => (houts(i) += (lane, rd.undet) -> new Fout(f"${rd.fout}${rd.undet}/${rd.undet}_L${lane}%03d_${tile}-${rreads(i)}.fastq"))
-      }
-      val stuff = rreads.indices.map{ i =>
-        bcl.select(rreads(i))
-          .map(x => (x._1, x._3, x._4))
-          .split{
-	  input : (Block, Block, Block) =>
-	  new String(input._1) match {
-            case x => List(rd.fuz.getIndex((lane, x)))
-	  }
-        }
-      }
-      val output = rreads.indices.flatMap{ i =>
-        houts(i).keys.map{ k =>
-	  val ds = stuff(i).select(k._2).map(x => (x._2, x._3))
-	    .map(new toFQ)
-	    // .map(new delAdapter(rd.adapter.getBytes))
-	    .map(new Flatter)
-	  val ho = houts(i)(k)
-	  (ds, ho)
-        }
-      }
-      return output
-    }
-    val stuff = input.flatMap(procReads)
-    stuff.foreach(x => x._1.writeUsingOutputFormat(x._2).setParallelism(1))
-    mFP.env.execute
-  }
-  // process tile, CRAM output, PRQ as intermediate format
-  def CRAMprocess(input : Seq[(Int, Int)]) = {
-    val mFP = new Fenv
-    mFP.env.setParallelism(rd.flinkpar)
-    val prq2sam = new PRQ2SAMRecord(roba.sref)
-    def finalizeOutput(p : String) = {
-      val opath = new HPath(p)
-      val job = Job.getInstance(new HConf)
-      MapreduceFileOutputFormat.setOutputPath(job, opath)
-      val hof = new HadoopOutputFormat(new SAM2CRAM, job)
-      hof.finalizeGlobal(1)
-    }
-    def writeToOF(x : (DataStream[SAMRecordWritable], String)) = {
-      val opath = new HPath(x._2)
-      val job = Job.getInstance(new HConf)
-      MapreduceFileOutputFormat.setOutputPath(job, opath)
-      val hof = new HadoopOutputFormat(new SAM2CRAM, job)
-      x._1.map(s => (new LongWritable(123), s)).writeUsingOutputFormat(hof).setParallelism(1)
-    }
-    def writeText(x : (DataStream[Block], String)) = {
-      val hof = new Fout(x._2)
-      x._1.writeUsingOutputFormat(hof).setParallelism(1)
-    }
-    def procReads(input : (Int, Int)) : Seq[(DataStream[SAMRecordWritable], String)] = {
-      val (lane, tile) = input
-      println(s"Processing lane $lane tile $tile")
-      val in = mFP.env.fromElements(input)
-      val bcl = in.flatMap(new PRQreadBCL(rd))
 
       var houts = sampleMap.filterKeys(_._1 == lane)
           .map {
 	  case (k, pref) => ((k._1, k._2) -> new String(f"${rd.fout}${pref}/${pref}_L${k._1}%03d_${tile}.cram"))
         }
       houts += (lane, rd.undet) -> new String(f"${rd.fout}${rd.undet}/${rd.undet}_L${lane}%03d_${tile}.cram")
+      val fns = houts.values.toArray
+      val filenames = fns //.indices.map(i => s"$jid - $i: " + fns(i))
+      Reader.conProducer.send(new ProducerRecord(rd.kafkaControl, jid, filenames.mkString("\n")))
+
+      val in = FP.fromElements(input)
+      val bcl = in.flatMap(new PRQreadBCL(rd))
       val stuff = bcl
         .split {
 	input : (Block, Block, Block, Block) =>
@@ -258,24 +199,30 @@ class Reader extends Serializable{
 	}
       }
       val output = houts.keys.map{ k =>
-	val ds0 = stuff.select(k._2).map(x => (x._2, x._3, x._4))
+	val ds = stuff.select(k._2).map(x => (x._2, x._3, x._4))
 	  .map(new toPRQ)
-	  .countWindowAll(1024)
-
-        val ds = ds0
-	  .apply(prq2sam)
-          .setParallelism(1)
 
 	val ho = houts(k)
 	(ds, ho)
       }.toSeq
       return output
     }
+    // send filenames to kafkaControl
     val stuff = input.flatMap(procReads)
-    // stuff.foreach(r => writeText((r._1.map(_.toString.getBytes), r._2)))
-    stuff.foreach(writeToOF)
-    mFP.env.execute
-    stuff.map(_._2).foreach(finalizeOutput)
+    stuff.foreach(kafkize(jid))
+    FP.execute
+  }
+  def kafkize(jid : Int)(x : (DataStream[PRQData], String)) = {
+    val ds = x._1
+    val keyfile = x._2
+
+    val prod = FlinkKafkaProducer010.writeToKafkaWithTimestamps(
+      ds.javaStream,
+      rd.kafkaTopic + jid.toString,
+      new MyPRQSerializer(keyfile),
+      new ProdProps("outproducer10."),
+      new MyPartitioner(runReader.kafkapar)
+    )
   }
   def readSampleNames = {
     // open SampleSheet.csv
@@ -332,11 +279,13 @@ class Reader extends Serializable{
   }
 }
 
-object test {
+object runReader {
+  var kafkapar = 1
   def main(args: Array[String]) {
     val propertiesFile = "conf/bclconverter.properties"
     val param = ParameterTool.fromPropertiesFile(propertiesFile)
-    val numTasks = param.getInt("numTasks") // concurrent flink tasks to be run
+    val numTasks = param.getInt("numReaders") // concurrent flink tasks to be run
+    kafkapar = param.getInt("kafkapar", kafkapar)
     implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
     // implicit val timeout = Timeout(30 seconds)
 
@@ -346,8 +295,9 @@ object test {
    
     val w = reader.getAllJobs
     val jnum = reader.rd.jnum
-    val tasks = w.sliding(jnum, jnum).map(x => Future{reader.CRAMprocess(x)}) // use CRAMprocess to generate CRAM files
+    val tasks = w.sliding(jnum, jnum).map(x => Future{reader.BCLprocess(x)})
     val aggregated = Future.sequence(tasks)
     Await.result(aggregated, Duration.Inf)
+    Reader.conProducer.close
   }
 }

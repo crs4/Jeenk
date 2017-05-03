@@ -1,4 +1,4 @@
-package bclconverter
+package bclconverter.reader
 
 import annotation.tailrec
 import java.io._

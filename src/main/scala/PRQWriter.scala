@@ -6,8 +6,8 @@ import com.typesafe.config.ConfigFactory
 import cz.adamh.utils.NativeUtils
 import java.io.OutputStream
 import java.nio.ByteBuffer
-import java.util.concurrent.Executors
 import java.util.Properties
+import java.util.concurrent.Executors
 import org.apache.flink.api.common.io.OutputFormat
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.utils.ParameterTool
@@ -26,20 +26,27 @@ import org.apache.hadoop.io.compress.zlib.{ZlibCompressor, ZlibFactory}
 import org.apache.hadoop.io.{NullWritable, LongWritable}
 import org.apache.hadoop.mapreduce.lib.output.{FileOutputFormat => MapreduceFileOutputFormat}
 import org.apache.hadoop.mapreduce.{Job, RecordWriter, TaskAttemptContext}
+import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.seqdoop.hadoop_bam.{AnySAMInputFormat, CRAMInputFormat, SAMRecordWritable, KeyIgnoringCRAMOutputFormat, KeyIgnoringCRAMRecordWriter, KeyIgnoringBAMOutputFormat, KeyIgnoringBAMRecordWriter}
+import scala.collection.JavaConversions._
 import scala.collection.parallel._
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
-import scala.collection.JavaConversions._
 
-import org.apache.kafka.clients.consumer.KafkaConsumer
 import bclconverter.reader.Reader.{Block, PRQData}
 
 
 class MyPRQDeserializer extends KeyedDeserializationSchema[(String, PRQData)] {
   // Main methods
   override def getProducedType = TypeInformation.of(classOf[(String, PRQData)])
-  override def isEndOfStream(el : (String, PRQData)) : Boolean = false
+  override def isEndOfStream(el : (String, PRQData)) : Boolean = {
+    if (el._1.equals("STOP")){
+      println("STOOOOP")
+      true
+    }
+    else
+      false
+  }
   override def deserialize(key : Array[Byte], data : Array[Byte], topic : String, partition : Int, offset : Long) : (String, PRQData) = {
     val (s1, r1) = data.splitAt(4)
     val (p1, d1) = r1.splitAt(toInt(s1))
@@ -59,7 +66,7 @@ class MyPRQDeserializer extends KeyedDeserializationSchema[(String, PRQData)] {
 
 class ConsProps(pref: String) extends Properties {
   private val pkeys = Seq("bootstrap.servers", "group.id", "request.timeout.ms",
-  "value.deserializer", "key.deserializer").map(pref + _)
+  "value.deserializer", "key.deserializer", "auto.offset.reset").map(pref + _)
   lazy val typesafeConfig = ConfigFactory.load()
 
   pkeys.map{ key =>
@@ -73,21 +80,17 @@ class ConsProps(pref: String) extends Properties {
 }
 
 
-class WData extends Serializable{
+class WData(param : ParameterTool) extends Serializable{
   // parameters
-  var root : String = null
-  var fout : String = null
-  var flinkpar = 1
   var kafkaTopic : String = "prq"
   var kafkaControl : String = "kcon"
-  def setParams(param : ParameterTool) = {
-    root = param.getRequired("root")
-    fout = param.getRequired("fout")
-    flinkpar = param.getInt("writerflinkpar", flinkpar)
-    kafkaTopic = param.get("kafkaTopic", kafkaTopic)
-    kafkaControl = param.get("kafkaControl", kafkaControl)
-    roba.rapipar = param.getInt("rapipar", roba.rapipar)
-  }
+  var flinkpar = 1
+  val root = param.getRequired("root")
+  val fout = param.getRequired("fout")
+  flinkpar = param.getInt("writerflinkpar", flinkpar)
+  kafkaTopic = param.get("kafkaTopic", kafkaTopic)
+  kafkaControl = param.get("kafkaControl", kafkaControl)
+  roba.rapipar = param.getInt("rapipar", roba.rapipar)
 }
 
 object Writer {
@@ -102,14 +105,10 @@ object Writer {
     // return the filesystem
     fs
   }
-  val cp = new ConsProps("conconsumer10.")
-  cp.put("enable.auto.commit", "true")
-  cp.put("auto.commit.interval.ms", "1000")
-  val conConsumer = new KafkaConsumer[Int, String](cp)
+  val rg = new scala.util.Random
 }
 
-class Writer extends Serializable{
-  val wd = new WData
+class Writer(wd : WData) extends Serializable{
   var sampleMap = Map[(Int, String), String]()
   // process tile, CRAM output, PRQ as intermediate format
   def kafka2cram(jid : Int, filenames : Array[String]) = {
@@ -130,7 +129,12 @@ class Writer extends Serializable{
       x._1.map(s => (new LongWritable(123), s)).writeUsingOutputFormat(hof).setParallelism(1)
     }
     def readFromKafka : DataStream[(String, PRQData)] = {
-      val cons = new FlinkKafkaConsumer010[(String, PRQData)](wd.kafkaTopic + jid.toString, new MyPRQDeserializer, new ConsProps("outconsumer10."))
+      val props = new ConsProps("outconsumer10.")
+      // props.put("group.id", s"${Writer.rg.nextInt} jid:$jid")
+      // props.put("auto.offset.reset", "earliest")
+      props.put("enable.auto.commit", "true")
+      props.put("auto.commit.interval.ms", "1000")
+      val cons = new FlinkKafkaConsumer010[(String, PRQData)](wd.kafkaTopic + jid.toString, new MyPRQDeserializer, props)
       val ds = FP
         .addSource(cons)
       ds
@@ -159,16 +163,31 @@ object runWriter {
     implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
     // implicit val timeout = Timeout(30 seconds)
 
-    val rw = new Writer
-    rw.wd.setParams(param)
+    val wd = new WData(param)
 
-    Writer.conConsumer.subscribe(List(rw.wd.kafkaControl))
+    val rg = new scala.util.Random
+    val cp = new ConsProps("conconsumer10.")
+    // cp.put("group.id", s"${rg.nextInt} control")
+    // cp.put("group.id", "kontrol")
+    // cp.put("auto.offset.reset", "earliest")
+    cp.put("enable.auto.commit", "true")
+    cp.put("auto.commit.interval.ms", "1000")
+    val conConsumer = new KafkaConsumer[Int, String](cp)
+
+    conConsumer.subscribe(List(wd.kafkaControl))
+    var loop = 0
+    var jobs = List[Future[Any]]()
     while (true) {
-      val records = Writer.conConsumer.poll(1000)
-      records.foreach(r => println(r.key))
-      val jobs = records.map(r => Future{rw.kafka2cram(r.key, r.value.split("\n"))})
-      val aggregated = Future.sequence(jobs)
-      Await.result(aggregated, Duration.Inf)
+      loop += 1
+      val records = conConsumer.poll(3000)
+      records.foreach(r => println("Adding to queue job " + r.key))
+      jobs ++= records.map(r => Future{
+        val rw = new Writer(wd)
+        rw.kafka2cram(r.key, r.value.split("\n"))
+      })
+      // val aggregated = Future.sequence(jobs)
+      // Await.result(aggregated, Duration.Inf)
     }
+    conConsumer.close
   }
 }

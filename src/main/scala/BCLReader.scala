@@ -2,8 +2,11 @@ package bclconverter.reader
 
 import akka.pattern.ask
 import akka.util.Timeout
+import com.typesafe.config.ConfigFactory
 import cz.adamh.utils.NativeUtils
 import java.io.{OutputStream, PrintWriter, File, FileOutputStream}
+import java.nio.ByteBuffer
+import java.util.Properties
 import java.util.concurrent.Executors
 import org.apache.flink.api.common.io.OutputFormat
 import org.apache.flink.api.java.utils.ParameterTool
@@ -12,6 +15,9 @@ import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
 import org.apache.flink.streaming.api.windowing.time.Time
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer010
+import org.apache.flink.streaming.connectors.kafka.partitioner.{KafkaPartitioner, FixedPartitioner}
+import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, SimpleStringSchema}
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
 import org.apache.hadoop.io.compress.CompressionCodecFactory
@@ -19,25 +25,16 @@ import org.apache.hadoop.io.compress.zlib.{ZlibCompressor, ZlibFactory}
 import org.apache.hadoop.io.{NullWritable, LongWritable}
 import org.apache.hadoop.mapreduce.Job
 import org.apache.hadoop.mapreduce.lib.output.{FileOutputFormat => MapreduceFileOutputFormat}
+import org.apache.kafka.clients.producer.{Partitioner, KafkaProducer, ProducerRecord}
+import org.apache.kafka.common.Cluster
+import org.apache.kafka.common.serialization.Serializer
 import org.seqdoop.hadoop_bam.SAMRecordWritable
-import scala.collection.parallel._
 import scala.collection.JavaConversions._
+import scala.collection.parallel._
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
 import scala.io.Source
 import scala.xml.{XML, Node}
-
-import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer010
-import org.apache.flink.streaming.util.serialization.KeyedSerializationSchema
-import java.util.Properties
-import com.typesafe.config.ConfigFactory
-import java.nio.ByteBuffer
-import org.apache.kafka.common.Cluster
-import org.apache.kafka.clients.producer.Partitioner
-import org.apache.kafka.common.serialization.Serializer
-import org.apache.flink.streaming.connectors.kafka.partitioner.{KafkaPartitioner, FixedPartitioner}
-import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
-import org.apache.flink.streaming.util.serialization.SimpleStringSchema
 
 import Reader.{Block, PRQData}
 
@@ -152,7 +149,6 @@ class RData extends Serializable{
 object Reader {
   type Block = Array[Byte]
   type PRQData = (Block, Block, Block, Block, Block)
-  // val pw = new PrintWriter(new FileOutputStream(new File("/u/cesco/code/bclconverter/filenames.txt"), true))
   val conProducer = new KafkaProducer[Int, String](new ProdProps("conproducer10."))
   def MyFS(path : HPath = null) : FileSystem = {
     var fs : FileSystem = null
@@ -173,9 +169,29 @@ class Reader() extends Serializable {
   var sampleMap = Map[(Int, String), String]()
   // processes tile and produces PRQ
   def BCLprocess(input : Seq[(Int, Int)]) = {
-    val jid = input.head._1 * 10000 + input.head._2
     val FP = StreamExecutionEnvironment.getExecutionEnvironment
     FP.setParallelism(rd.flinkpar)
+    val jid = input.head._1 * 10000 + input.head._2
+    def kafkize(jid : Int)(x : (DataStream[PRQData], String)) = {
+      val ds = (x._1)
+      val keyfile = x._2
+      // old api
+      // val outProducer = new FlinkKafkaProducer010(
+      //   rd.kafkaTopic + jid.toString,
+      //   new MyPRQSerializer(keyfile),
+      //   new ProdProps("outproducer10."),
+      //   new MyPartitioner(runReader.kafkapar)
+      // )
+      // ds.addSink(outProducer)
+      // new api
+      FlinkKafkaProducer010.writeToKafkaWithTimestamps(
+        ds.javaStream,
+        rd.kafkaTopic + jid.toString,
+        new MyPRQSerializer(keyfile),
+        new ProdProps("outproducer10."),
+        new MyPartitioner(runReader.kafkapar)
+      )
+    }
     def procReads(input : (Int, Int)) : Seq[(DataStream[PRQData], String)] = {
       val (lane, tile) = input
       println(s"Processing lane $lane tile $tile")
@@ -207,22 +223,35 @@ class Reader() extends Serializable {
       }.toSeq
       return output
     }
-    // send filenames to kafkaControl
+    // send to kafka
     val stuff = input.flatMap(procReads)
     stuff.foreach(kafkize(jid))
+    // run
     FP.execute
-  }
-  def kafkize(jid : Int)(x : (DataStream[PRQData], String)) = {
-    val ds = x._1
-    val keyfile = x._2
-
-    val prod = FlinkKafkaProducer010.writeToKafkaWithTimestamps(
-      ds.javaStream,
-      rd.kafkaTopic + jid.toString,
-      new MyPRQSerializer(keyfile),
-      new ProdProps("outproducer10."),
-      new MyPartitioner(runReader.kafkapar)
-    )
+    // add EOS
+    val k : Block = Array(13)
+    val eos : PRQData = (k, k, k, k, k)
+    val EOS : DataStream[PRQData] = FP.fromElements(eos)
+    // send EOS to each kafka partition
+    Range(0, runReader.kafkapar).foreach{p =>
+      // old api
+      // val outProducer = new FlinkKafkaProducer010(
+      //   rd.kafkaTopic + jid.toString,
+      //   new MyPRQSerializer("STOP"),
+      //   new ProdProps("outproducer10."),
+      //   new MyPartitioner(runReader.kafkapar)
+      // )
+      // EOS.addSink(outProducer)
+      // new api
+      FlinkKafkaProducer010.writeToKafkaWithTimestamps(
+        EOS.javaStream,
+        rd.kafkaTopic + jid.toString,
+        new MyPRQSerializer("STOP"),
+        new ProdProps("outproducer10."),
+        new MyPartitioner(runReader.kafkapar)
+      )
+    }
+    FP.execute
   }
   def readSampleNames = {
     // open SampleSheet.csv

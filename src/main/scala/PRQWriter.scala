@@ -40,7 +40,7 @@ class MyPRQDeserializer extends KeyedDeserializationSchema[(String, PRQData)] {
   // Main methods
   override def getProducedType = TypeInformation.of(classOf[(String, PRQData)])
   override def isEndOfStream(el : (String, PRQData)) : Boolean = {
-    if (el._1.equals("STOP")){
+    if (el._1.equals("-1")){
       println("STOOOOP")
       true
     }
@@ -109,9 +109,8 @@ object Writer {
 }
 
 class Writer(wd : WData) extends Serializable{
-  var sampleMap = Map[(Int, String), String]()
   // process tile, CRAM output, PRQ as intermediate format
-  def kafka2cram(jid : Int, filenames : Array[String]) = {
+  def kafka2cram(jid : Int, toc : Array[String]) = {
     val FP = StreamExecutionEnvironment.getExecutionEnvironment
     FP.setParallelism(wd.flinkpar)
     def finalizeOutput(p : String) = {
@@ -130,7 +129,6 @@ class Writer(wd : WData) extends Serializable{
     }
     def readFromKafka : DataStream[(String, PRQData)] = {
       val props = new ConsProps("outconsumer10.")
-      // props.put("group.id", s"${Writer.rg.nextInt} jid:$jid")
       // props.put("auto.offset.reset", "earliest")
       props.put("enable.auto.commit", "true")
       props.put("auto.commit.interval.ms", "1000")
@@ -147,11 +145,12 @@ class Writer(wd : WData) extends Serializable{
       .countWindow(32*1024)
       .apply(new PRQ2SAMRecord(roba.sref))
     // TODO: work here
+    val filenames = toc.map(s => s.split(" ", 2))
     val splitted = sam.split(x => List(x._1))
-    val jobs = filenames.map(f => (splitted.select(f).map(_._2), f))
+    val jobs = filenames.map(f => (splitted.select(f.head).map(_._2), f.last))
     jobs.foreach(writeToOF)
     FP.execute
-    filenames.foreach(finalizeOutput)
+    filenames.map(_.last).foreach(finalizeOutput)
   }
 }
 
@@ -167,8 +166,6 @@ object runWriter {
 
     val rg = new scala.util.Random
     val cp = new ConsProps("conconsumer10.")
-    // cp.put("group.id", s"${rg.nextInt} control")
-    // cp.put("group.id", "kontrol")
     // cp.put("auto.offset.reset", "earliest")
     cp.put("enable.auto.commit", "true")
     cp.put("auto.commit.interval.ms", "1000")

@@ -168,21 +168,22 @@ class Reader() extends Serializable {
   var sampleMap = Map[(Int, String), String]()
   // processes tile and produces PRQ
   def BCLprocess(input : Seq[(Int, Int)]) = {
+    var f2id = Map[String, Int]()
     val FP = StreamExecutionEnvironment.getExecutionEnvironment
     FP.setParallelism(rd.flinkpar)
     val jid = input.head._1 * 10000 + input.head._2
     def kafkize(jid : Int)(x : (DataStream[PRQData], String)) = {
       val ds = (x._1)
-      val keyfile = x._2
+      val key = x._2
       FlinkKafkaProducer010.writeToKafkaWithTimestamps(
         ds.javaStream,
         rd.kafkaTopic + jid.toString,
-        new MyPRQSerializer(keyfile),
+        new MyPRQSerializer(key),
         new ProdProps("outproducer10."),
         new MyPartitioner(runReader.kafkapar)
       )
     }
-    def getHouts(lane : Int, tile : Int) : Map[(Int, String),String] = {
+    def getHouts(lane : Int, tile : Int) : Map[(Int, String), String] = {
       var houts = sampleMap.filterKeys(_._1 == lane)
         .map {
 	case (k, pref) => ((k._1, k._2) -> new String(f"${rd.fout}${pref}/${pref}_L${k._1}%03d_${tile}.cram"))
@@ -192,8 +193,9 @@ class Reader() extends Serializable {
     }
     def sendTOC = {
       val fns = input.flatMap(x => getHouts(x._1, x._2).values)
-      val filenames = fns //.indices.map(i => s"$i " + fns(i))
+      val filenames = fns.indices.map(i => s"$i " + fns(i))
       Reader.conProducer.send(new ProducerRecord(rd.kafkaControl, jid, filenames.mkString("\n")))
+      f2id = fns.indices.map(i => (fns(i), i)).toMap
     }
     def procReads(input : (Int, Int)) : Seq[(DataStream[PRQData], String)] = {
       val (lane, tile) = input
@@ -215,7 +217,7 @@ class Reader() extends Serializable {
 	  .map(new toPRQ)
 
 	val ho = houts(k)
-	(ds, ho)
+	(ds, f2id(ho).toString)
       }.toSeq
       return output
     }
@@ -233,7 +235,7 @@ class Reader() extends Serializable {
       FlinkKafkaProducer010.writeToKafkaWithTimestamps(
         EOS.javaStream,
         rd.kafkaTopic + jid.toString,
-        new MyPRQSerializer("STOP"),
+        new MyPRQSerializer("-1"),
         new ProdProps("outproducer10."),
         new MyPartitioner(runReader.kafkapar)
       )

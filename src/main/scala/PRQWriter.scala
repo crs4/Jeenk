@@ -175,18 +175,14 @@ object runWriter {
     val conConsumer = new KafkaConsumer[Int, String](cp)
 
     conConsumer.subscribe(List(wd.kafkaControl))
-    var loop = 0
     var jobs = List[Future[Any]]()
     while (true) {
-      loop += 1
       val records = conConsumer.poll(3000)
-      records.foreach(r => println("Adding to queue job " + r.key))
+      records.foreach(r => println("Adding job " + r.key))
       jobs ++= records.map(r => Future{
         val rw = new Writer(wd)
         rw.kafka2cram(r.key, r.value.split("\n"))
       })
-      // val aggregated = Future.sequence(jobs)
-      // Await.result(aggregated, Duration.Inf)
     }
     conConsumer.close
   }

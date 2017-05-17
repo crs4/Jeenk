@@ -165,7 +165,6 @@ object Reader {
 
 class Reader() extends Serializable {
   val rd = new RData
-  // var filenames = List[String]()
   var sampleMap = Map[(Int, String), String]()
   // processes tile and produces PRQ
   def BCLprocess(input : Seq[(Int, Int)]) = {
@@ -175,15 +174,6 @@ class Reader() extends Serializable {
     def kafkize(jid : Int)(x : (DataStream[PRQData], String)) = {
       val ds = (x._1)
       val keyfile = x._2
-      // old api
-      // val outProducer = new FlinkKafkaProducer010(
-      //   rd.kafkaTopic + jid.toString,
-      //   new MyPRQSerializer(keyfile),
-      //   new ProdProps("outproducer10."),
-      //   new MyPartitioner(runReader.kafkapar)
-      // )
-      // ds.addSink(outProducer)
-      // new api
       FlinkKafkaProducer010.writeToKafkaWithTimestamps(
         ds.javaStream,
         rd.kafkaTopic + jid.toString,
@@ -192,18 +182,24 @@ class Reader() extends Serializable {
         new MyPartitioner(runReader.kafkapar)
       )
     }
+    def getHouts(lane : Int, tile : Int) : Map[(Int, String),String] = {
+      var houts = sampleMap.filterKeys(_._1 == lane)
+        .map {
+	case (k, pref) => ((k._1, k._2) -> new String(f"${rd.fout}${pref}/${pref}_L${k._1}%03d_${tile}.cram"))
+      }
+      houts += (lane, rd.undet) -> new String(f"${rd.fout}${rd.undet}/${rd.undet}_L${lane}%03d_${tile}.cram")
+      houts
+    }
+    def sendTOC = {
+      val fns = input.flatMap(x => getHouts(x._1, x._2).values)
+      val filenames = fns //.indices.map(i => s"$i " + fns(i))
+      Reader.conProducer.send(new ProducerRecord(rd.kafkaControl, jid, filenames.mkString("\n")))
+    }
     def procReads(input : (Int, Int)) : Seq[(DataStream[PRQData], String)] = {
       val (lane, tile) = input
       println(s"Processing lane $lane tile $tile")
 
-      var houts = sampleMap.filterKeys(_._1 == lane)
-          .map {
-	  case (k, pref) => ((k._1, k._2) -> new String(f"${rd.fout}${pref}/${pref}_L${k._1}%03d_${tile}.cram"))
-        }
-      houts += (lane, rd.undet) -> new String(f"${rd.fout}${rd.undet}/${rd.undet}_L${lane}%03d_${tile}.cram")
-      val fns = houts.values.toArray
-      val filenames = fns //.indices.map(i => s"$jid - $i: " + fns(i))
-      Reader.conProducer.send(new ProducerRecord(rd.kafkaControl, jid, filenames.mkString("\n")))
+      val houts = getHouts(lane, tile)
 
       val in = FP.fromElements(input)
       val bcl = in.flatMap(new PRQreadBCL(rd))
@@ -224,9 +220,9 @@ class Reader() extends Serializable {
       return output
     }
     // send to kafka
+    sendTOC
     val stuff = input.flatMap(procReads)
     stuff.foreach(kafkize(jid))
-    // run
     FP.execute
     // add EOS
     val k : Block = Array(13)
@@ -234,15 +230,6 @@ class Reader() extends Serializable {
     val EOS : DataStream[PRQData] = FP.fromElements(eos)
     // send EOS to each kafka partition
     Range(0, runReader.kafkapar).foreach{p =>
-      // old api
-      // val outProducer = new FlinkKafkaProducer010(
-      //   rd.kafkaTopic + jid.toString,
-      //   new MyPRQSerializer("STOP"),
-      //   new ProdProps("outproducer10."),
-      //   new MyPartitioner(runReader.kafkapar)
-      // )
-      // EOS.addSink(outProducer)
-      // new api
       FlinkKafkaProducer010.writeToKafkaWithTimestamps(
         EOS.javaStream,
         rd.kafkaTopic + jid.toString,

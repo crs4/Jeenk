@@ -36,18 +36,18 @@ import scala.concurrent.{ExecutionContext, Await, Future}
 import bclconverter.reader.Reader.{Block, PRQData}
 
 
-class MyPRQDeserializer extends KeyedDeserializationSchema[(String, PRQData)] {
+class MyPRQDeserializer extends KeyedDeserializationSchema[(Int, PRQData)] {
   // Main methods
-  override def getProducedType = TypeInformation.of(classOf[(String, PRQData)])
-  override def isEndOfStream(el : (String, PRQData)) : Boolean = {
-    if (el._1.equals("-1")){
-      println("STOOOOP")
+  override def getProducedType = TypeInformation.of(classOf[(Int, PRQData)])
+  override def isEndOfStream(el : (Int, PRQData)) : Boolean = {
+    if (el._1 == -1){
+      println("EOS reached")
       true
     }
     else
       false
   }
-  override def deserialize(key : Array[Byte], data : Array[Byte], topic : String, partition : Int, offset : Long) : (String, PRQData) = {
+  override def deserialize(key : Array[Byte], data : Array[Byte], topic : String, partition : Int, offset : Long) : (Int, PRQData) = {
     val (s1, r1) = data.splitAt(4)
     val (p1, d1) = r1.splitAt(toInt(s1))
     val (s2, r2) = d1.splitAt(4)
@@ -57,7 +57,7 @@ class MyPRQDeserializer extends KeyedDeserializationSchema[(String, PRQData)] {
     val (s4, r4) = d3.splitAt(4)
     val (p4, d4) = r4.splitAt(toInt(s4))
     val (s5, p5) = d4.splitAt(4)
-    (new String(key), (p1, p2, p3, p4, p5))
+    (toInt(key), (p1, p2, p3, p4, p5))
   }
   def toInt(a : Array[Byte]) : Int = {
     ByteBuffer.wrap(a).getInt
@@ -127,12 +127,12 @@ class Writer(wd : WData) extends Serializable{
       val hof = new HadoopOutputFormat(new SAM2CRAM, job)
       x._1.map(s => (new LongWritable(123), s)).writeUsingOutputFormat(hof).setParallelism(1)
     }
-    def readFromKafka : DataStream[(String, PRQData)] = {
+    def readFromKafka : DataStream[(Int, PRQData)] = {
       val props = new ConsProps("outconsumer10.")
       // props.put("auto.offset.reset", "earliest")
       props.put("enable.auto.commit", "true")
       props.put("auto.commit.interval.ms", "1000")
-      val cons = new FlinkKafkaConsumer010[(String, PRQData)](wd.kafkaTopic + jid.toString, new MyPRQDeserializer, props)
+      val cons = new FlinkKafkaConsumer010[(Int, PRQData)](wd.kafkaTopic + jid.toString, new MyPRQDeserializer, props)
       val ds = FP
         .addSource(cons)
       ds
@@ -146,7 +146,7 @@ class Writer(wd : WData) extends Serializable{
       .apply(new PRQ2SAMRecord(roba.sref))
     // TODO: work here
     val filenames = toc.map(s => s.split(" ", 2))
-    val splitted = sam.split(x => List(x._1))
+    val splitted = sam.split(x => List(x._1.toString))
     val jobs = filenames.map(f => (splitted.select(f.head).map(_._2), f.last))
     jobs.foreach(writeToOF)
     FP.execute

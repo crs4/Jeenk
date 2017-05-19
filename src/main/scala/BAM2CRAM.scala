@@ -116,7 +116,7 @@ class SomeData(r : String) extends Serializable {
   // init(r)
 }
 
-class PRQ2SAMRecord(refPath : String) extends WindowFunction[(String, PRQData), (String, SAMRecordWritable), Tuple, GlobalWindow] { // with Serializable {
+class PRQ2SAMRecord(refPath : String) extends WindowFunction[(Int, PRQData), (Int, SAMRecordWritable), Tuple, GlobalWindow] { // with Serializable {
   def alignOpToCigarElement(alnOp : AlignOp) : CigarElement = {
     val cigarOp = (alnOp.getType) match {
       case AlignOp.Type.Match => CigarOperator.M
@@ -195,9 +195,9 @@ class PRQ2SAMRecord(refPath : String) extends WindowFunction[(String, PRQData), 
     r.set(out)
     r
   }
-  def apply(key : Tuple, w : GlobalWindow, in : Iterable[(String, PRQData)], out : Collector[(String, SAMRecordWritable)]) = {
+  def apply(key : Tuple, w : GlobalWindow, in : Iterable[(Int, PRQData)], out : Collector[(Int, SAMRecordWritable)]) = {
     // insert PRQ data
-    val fn : String = key.getField(0)
+    val fn : Int = key.getField(0)
     val reads = new Batch(2)
     val chr = java.nio.charset.Charset.forName("US-ASCII")
     reads.reserve(in.size << 1)

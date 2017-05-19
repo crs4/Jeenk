@@ -38,9 +38,9 @@ import scala.xml.{XML, Node}
 
 import Reader.{Block, PRQData}
 
-class MyPRQSerializer(key : String) extends KeyedSerializationSchema[PRQData] {
+class MyPRQSerializer(key : Int) extends KeyedSerializationSchema[PRQData] {
   override def serializeKey(x : PRQData)  : Array[Byte] = {
-    return key.getBytes
+    return toBytes(key)
   }
   def toBytes(i : Int) : Array[Byte] = {
     ByteBuffer.allocate(4).putInt(i).array
@@ -172,7 +172,7 @@ class Reader() extends Serializable {
     val FP = StreamExecutionEnvironment.getExecutionEnvironment
     FP.setParallelism(rd.flinkpar)
     val jid = input.head._1 * 10000 + input.head._2
-    def kafkize(jid : Int)(x : (DataStream[PRQData], String)) = {
+    def kafkize(jid : Int)(x : (DataStream[PRQData], Int)) = {
       val ds = (x._1)
       val key = x._2
       FlinkKafkaProducer010.writeToKafkaWithTimestamps(
@@ -197,7 +197,7 @@ class Reader() extends Serializable {
       Reader.conProducer.send(new ProducerRecord(rd.kafkaControl, jid, filenames.mkString("\n")))
       f2id = fns.indices.map(i => (fns(i), i)).toMap
     }
-    def procReads(input : (Int, Int)) : Seq[(DataStream[PRQData], String)] = {
+    def procReads(input : (Int, Int)) : Seq[(DataStream[PRQData], Int)] = {
       val (lane, tile) = input
       println(s"Processing lane $lane tile $tile")
 
@@ -217,7 +217,7 @@ class Reader() extends Serializable {
 	  .map(new toPRQ)
 
 	val ho = houts(k)
-	(ds, f2id(ho).toString)
+	(ds, f2id(ho))
       }.toSeq
       return output
     }
@@ -235,7 +235,7 @@ class Reader() extends Serializable {
       FlinkKafkaProducer010.writeToKafkaWithTimestamps(
         EOS.javaStream,
         rd.kafkaTopic + jid.toString,
-        new MyPRQSerializer("-1"),
+        new MyPRQSerializer(-1),
         new ProdProps("outproducer10."),
         new MyPartitioner(runReader.kafkapar)
       )

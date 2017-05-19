@@ -64,6 +64,10 @@ class MyPRQDeserializer extends KeyedDeserializationSchema[(Int, PRQData)] {
   }
 }
 
+object ConsProps {
+  val rg = new scala.util.Random
+}
+
 class ConsProps(pref: String) extends Properties {
   private val pkeys = Seq("bootstrap.servers", "group.id", "request.timeout.ms",
   "value.deserializer", "key.deserializer", "auto.offset.reset").map(pref + _)
@@ -74,6 +78,7 @@ class ConsProps(pref: String) extends Properties {
       put(key.replace(pref, ""), typesafeConfig.getString(key))
     }
   }
+  put("client.id", "robo" + ConsProps.rg.nextLong.toString)
 
   def getCustomString(key: String) = typesafeConfig.getString(key)
   def getCustomInt(key: String) = typesafeConfig.getInt(key)
@@ -105,7 +110,6 @@ object Writer {
     // return the filesystem
     fs
   }
-  val rg = new scala.util.Random
 }
 
 class Writer(wd : WData) extends Serializable{

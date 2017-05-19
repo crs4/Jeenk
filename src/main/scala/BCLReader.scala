@@ -66,6 +66,10 @@ class MyPartitioner(max : Int) extends KafkaPartitioner[PRQData] {
   }
 }
 
+object ProdProps {
+  val rg = new scala.util.Random
+}
+
 class ProdProps(pref : String) extends Properties {
   private val pkeys = Seq("bootstrap.servers", "acks", "compression.type", "key.serializer", "value.serializer",
     "batch.size", "linger.ms", "request.timeout.ms").map(pref + _)
@@ -76,6 +80,7 @@ class ProdProps(pref : String) extends Properties {
     if (typesafeConfig.hasPath(key))
       put(key.replace(pref, ""), typesafeConfig.getString(key))
   }
+  put("client.id", "robo" + ProdProps.rg.nextLong.toString)
 
   def getCustomString(key: String) = typesafeConfig.getString(key)
   def getCustomInt(key: String) = typesafeConfig.getInt(key)

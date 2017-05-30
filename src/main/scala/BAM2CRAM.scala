@@ -20,8 +20,8 @@ import org.apache.hadoop.mapreduce.{Job, RecordWriter, TaskAttemptContext}
 import org.seqdoop.hadoop_bam.util.SAMHeaderReader
 import org.seqdoop.hadoop_bam.{AnySAMInputFormat, CRAMInputFormat, SAMRecordWritable, KeyIgnoringCRAMOutputFormat, KeyIgnoringCRAMRecordWriter, KeyIgnoringBAMOutputFormat, KeyIgnoringBAMRecordWriter}
 import scala.collection.JavaConversions._
-
 import org.apache.flink.api.java.tuple.Tuple
+import com.typesafe.config.ConfigFactory
 
 import bclconverter.reader.Reader.{Block, PRQData, MyFS}
 
@@ -34,16 +34,17 @@ class SAM2CRAM extends KeyIgnoringCRAMOutputFormat[LongWritable] {
     super.getRecordWriter(ctx)
   }
   val head = new HPath("file:///u/cesco/dump/data/bam/coso.bam")
-  val ref = "file://" + roba.sref //"file:///u/cesco/dump/data/bam/c/chr1.fasta"
+  // val head = new HPath("file:///tmp/bam/coso.bam")
+  val ref = "file://" + roba.sref
 }
 
 
-class MidAlignerState(opts : MyOpts) extends AlignerState(opts) {
+class MidAlignerState(opts : Opts) extends AlignerState(opts) {
   def this() {
     this(roba.opts)
   }
 }
-class MyAlignerState(opts : MyOpts) extends MidAlignerState(opts) with Serializable {
+class MyAlignerState(opts : Opts) extends MidAlignerState(opts) with Serializable {
 }
 class MidRef(s : String) extends Ref(s) {
   def this() {
@@ -52,29 +53,25 @@ class MidRef(s : String) extends Ref(s) {
 }
 class MyRef(s : String) extends MidRef(s) with Serializable {
 }
-class MyOpts extends Opts with Serializable {
-  /*
-   * def writeObject(out : java.io.ObjectOutputStream) = {}
-   * def readObject(in : java.io.ObjectInputStream) = {}
-   */
-  // init
+class MyOpts(rapipar : Int) extends Opts with Serializable {
   setShareRefMem(true)
-  // TODO: fix here
-  if (true){ //(roba.rapipar > 0){
-    println("############################ " + roba.rapipar)
-    setNThreads(roba.rapipar)
-    Rapi.init(this)
-  }
+  setNThreads(rapipar)
+  Rapi.init(this)
 }
 
 object roba {
+  // val sref = "/tmp/bam/c/chr1.fasta"
   val sref = "/u/cesco/dump/data/bam/c/chr1.fasta"
   RapiUtils.loadPlugin()
-  var rapipar = 10
-  val opts = new MyOpts
+  lazy val conf = ConfigFactory.load()
+  var rapipar = 1
+  val key = "rapi.rapipar"
+  if (conf.hasPath(key))
+    rapipar = conf.getString(key).toInt
+  lazy val opts = new MyOpts(rapipar)
 }
 
-class SomeData(r : String) extends Serializable {
+class SomeData(r : String, rapipar : Int) extends Serializable {
   def createSamHeader(rapiRef : Ref) : SAMFileHeader = {
     def convertContig(rapiContig : Contig) : SAMSequenceRecord = {
       val sr = new SAMSequenceRecord(rapiContig.getName, rapiContig.getLen.toInt)
@@ -94,7 +91,7 @@ class SomeData(r : String) extends Serializable {
   }
   def init = {
     RapiUtils.loadPlugin 
-    opts = new MyOpts
+    opts = new MyOpts(rapipar)
     ref = new MyRef(vr)
     header = createSamHeader(ref)
     aligner = new MyAlignerState(opts)
@@ -214,6 +211,6 @@ class PRQ2SAMRecord(refPath : String) extends WindowFunction[(Int, PRQData), (In
       .foreach(x => out.collect((fn, x)))
   }
   // Init
-  var dati = new SomeData(refPath)
+  var dati = new SomeData(refPath, roba.rapipar)
   dati.init
 }

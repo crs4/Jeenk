@@ -95,7 +95,6 @@ class WData(param : ParameterTool) extends Serializable{
   flinkpar = param.getInt("writerflinkpar", flinkpar)
   kafkaTopic = param.get("kafkaTopic", kafkaTopic)
   kafkaControl = param.get("kafkaControl", kafkaControl)
-  roba.rapipar = param.getInt("rapipar", roba.rapipar)
 }
 
 object Writer {

@@ -16,7 +16,7 @@ import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer010
-import org.apache.flink.streaming.connectors.kafka.partitioner.{KafkaPartitioner, FixedPartitioner}
+import org.apache.flink.streaming.connectors.kafka.partitioner.KafkaPartitioner
 import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, SimpleStringSchema}
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
@@ -236,14 +236,16 @@ class Reader() extends Serializable {
     val eos : PRQData = (k, k, k, k, k)
     val EOS : DataStream[PRQData] = FP.fromElements(eos)
     // send EOS to each kafka partition
-    Range(0, runReader.kafkapar).foreach{p =>
-      FlinkKafkaProducer010.writeToKafkaWithTimestamps(
-        EOS.javaStream,
-        rd.kafkaTopic + jid.toString,
-        new MyPRQSerializer(-1),
-        new ProdProps("outproducer10."),
-        new MyPartitioner(runReader.kafkapar)
-      )
+    (f2id.values ++ List(-1)).foreach{id =>
+      Range(0, runReader.kafkapar).foreach{p =>
+        FlinkKafkaProducer010.writeToKafkaWithTimestamps(
+          EOS.javaStream,
+          rd.kafkaTopic + jid.toString,
+          new MyPRQSerializer(id),
+          new ProdProps("outproducer10."),
+          new MyPartitioner(runReader.kafkapar)
+        )
+      }
     }
     FP.execute
   }

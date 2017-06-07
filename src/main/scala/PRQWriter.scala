@@ -14,9 +14,9 @@ import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.api.scala.hadoop.mapreduce.HadoopOutputFormat
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.scala._
-import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
+import org.apache.flink.streaming.api.windowing.assigners.{TumblingEventTimeWindows, TumblingProcessingTimeWindows, GlobalWindows}
 import org.apache.flink.streaming.api.windowing.time.Time
-import org.apache.flink.streaming.api.windowing.windows.{Window, GlobalWindow}
+import org.apache.flink.streaming.api.windowing.windows.{Window, TimeWindow, GlobalWindow}
 import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer010, FlinkKafkaProducer010}
 import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, KeyedDeserializationSchema}
 import org.apache.hadoop.conf.{Configuration => HConf}
@@ -32,9 +32,25 @@ import scala.collection.JavaConversions._
 import scala.collection.parallel._
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
-
+import org.apache.flink.streaming.api.windowing.evictors.Evictor
+import org.apache.flink.streaming.api.windowing.evictors.Evictor.EvictorContext
+import org.apache.flink.streaming.api.windowing.triggers.Trigger
+import org.apache.flink.streaming.runtime.operators.windowing.TimestampedValue
 import bclconverter.reader.Reader.{Block, PRQData}
 
+class MyEvictor[W <: Window] extends Evictor[(Int, PRQData), W] {
+  override
+  def evictBefore(els : java.lang.Iterable[TimestampedValue[(Int, PRQData)]], size : Int, win : W, ec : EvictorContext) = {
+    var it = els.iterator
+    while (it.hasNext) {
+      val e = it.next.getValue._2._1.size
+      if (e == 1)
+        it.remove
+    }    
+  }
+  override
+  def evictAfter(els : java.lang.Iterable[TimestampedValue[(Int, PRQData)]], size : Int, win : W, ec : EvictorContext) = {}
+}
 
 class MyPRQDeserializer extends KeyedDeserializationSchema[(Int, PRQData)] {
   // Main methods
@@ -142,12 +158,12 @@ class Writer(wd : WData) extends Serializable{
     }
     // start here
     val stuff = readFromKafka
-    // val prq2sam = new PRQ2SAMRecord(roba.sref)
     val sam = stuff
       .keyBy(0)
-      .countWindow(32*1024)
-      .apply(new PRQ2SAMRecord(roba.sref))
-    // TODO: work here
+      .window(GlobalWindows.create)
+      .trigger(MyCountTrigger.of(32*1024))
+      .evictor(new MyEvictor[GlobalWindow])
+      .apply(new PRQ2SAMRecord[GlobalWindow](roba.sref))
     val filenames = toc.map(s => s.split(" ", 2))
     val splitted = sam.split(x => List(x._1.toString))
     val jobs = filenames.map(f => (splitted.select(f.head).map(_._2), f.last))

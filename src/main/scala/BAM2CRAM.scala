@@ -9,7 +9,7 @@ import org.apache.flink.api.scala.hadoop.mapreduce.{HadoopOutputFormat, HadoopIn
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.function.WindowFunction
-import org.apache.flink.streaming.api.windowing.windows.{Window, GlobalWindow}
+import org.apache.flink.streaming.api.windowing.windows.{Window, GlobalWindow, TimeWindow}
 import org.apache.flink.util.Collector
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
@@ -23,7 +23,7 @@ import scala.collection.JavaConversions._
 import org.apache.flink.api.java.tuple.Tuple
 import com.typesafe.config.ConfigFactory
 
-import bclconverter.reader.Reader.{Block, PRQData, MyFS}
+import bclconverter.reader.Reader.{Block, PRQData}
 
 // Writer from SAMRecordWritable to CRAM format
 class SAM2CRAM extends KeyIgnoringCRAMOutputFormat[LongWritable] {
@@ -60,15 +60,20 @@ class MyOpts(rapipar : Int) extends Opts with Serializable {
 }
 
 object roba {
-  // val sref = "/tmp/bam/c/chr1.fasta"
-  val sref = "/u/cesco/dump/data/bam/c/chr1.fasta"
+  // val sref = "/u/cesco/dump/data/bam/c/chr1.fasta"
   RapiUtils.loadPlugin()
   lazy val conf = ConfigFactory.load()
   var rapipar = 1
-  val key = "rapi.rapipar"
-  if (conf.hasPath(key))
-    rapipar = conf.getString(key).toInt
+  val key1 = "rapi.rapipar"
+  if (conf.hasPath(key1))
+    rapipar = conf.getString(key1).toInt
   lazy val opts = new MyOpts(rapipar)
+  var sref : String = _
+  val key2 = "rapi.sref"
+  if (conf.hasPath(key2))
+    sref = conf.getString(key2)
+  else
+    throw new Error("rapi.sref undefined")
 }
 
 class SomeData(r : String, rapipar : Int) extends Serializable {
@@ -113,7 +118,7 @@ class SomeData(r : String, rapipar : Int) extends Serializable {
   // init(r)
 }
 
-class PRQ2SAMRecord(refPath : String) extends WindowFunction[(Int, PRQData), (Int, SAMRecordWritable), Tuple, GlobalWindow] { // with Serializable {
+class PRQ2SAMRecord[W <: Window](refPath : String) extends WindowFunction[(Int, PRQData), (Int, SAMRecordWritable), Tuple, W] { // with Serializable {
   def alignOpToCigarElement(alnOp : AlignOp) : CigarElement = {
     val cigarOp = (alnOp.getType) match {
       case AlignOp.Type.Match => CigarOperator.M
@@ -192,7 +197,7 @@ class PRQ2SAMRecord(refPath : String) extends WindowFunction[(Int, PRQData), (In
     r.set(out)
     r
   }
-  def apply(key : Tuple, w : GlobalWindow, in : Iterable[(Int, PRQData)], out : Collector[(Int, SAMRecordWritable)]) = {
+  def apply(key : Tuple, w : W, in : Iterable[(Int, PRQData)], out : Collector[(Int, SAMRecordWritable)]) = {
     // insert PRQ data
     val fn : Int = key.getField(0)
     val reads = new Batch(2)
@@ -206,9 +211,9 @@ class PRQ2SAMRecord(refPath : String) extends WindowFunction[(Int, PRQData), (In
     }
     // align and get SAMRecord's
     dati.aligner.alignReads(dati.ref, reads)
-    reads
-      .flatMap(p => toRec2(p))
-      .foreach(x => out.collect((fn, x)))
+    val sams = reads.flatMap(p => toRec2(p))
+    println(s"#### reads:${reads.size}")
+    sams.foreach(x => out.collect((fn, x)))
   }
   // Init
   var dati = new SomeData(refPath, roba.rapipar)

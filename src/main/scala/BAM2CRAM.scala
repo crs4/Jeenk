@@ -1,9 +1,11 @@
 package bclconverter
 
+import com.typesafe.config.ConfigFactory
 import htsjdk.samtools.{SAMProgramRecord, SAMRecord, CigarOperator, Cigar, CigarElement, SAMFileHeader, SAMSequenceRecord}
 import it.crs4.rapi.{Alignment, AlignOp, Contig, Read, Fragment, Batch, Ref, AlignerState, Rapi, RapiUtils, RapiConstants, Opts}
 import org.apache.flink.api.common.functions.{MapFunction, FlatMapFunction, ReduceFunction, GroupReduceFunction}
 import org.apache.flink.api.common.io.OutputFormat
+import org.apache.flink.api.java.tuple.Tuple
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.api.scala.hadoop.mapreduce.{HadoopOutputFormat, HadoopInputFormat}
 import org.apache.flink.configuration.Configuration
@@ -20,8 +22,9 @@ import org.apache.hadoop.mapreduce.{Job, RecordWriter, TaskAttemptContext}
 import org.seqdoop.hadoop_bam.util.SAMHeaderReader
 import org.seqdoop.hadoop_bam.{AnySAMInputFormat, CRAMInputFormat, SAMRecordWritable, KeyIgnoringCRAMOutputFormat, KeyIgnoringCRAMRecordWriter, KeyIgnoringBAMOutputFormat, KeyIgnoringBAMRecordWriter}
 import scala.collection.JavaConversions._
-import org.apache.flink.api.java.tuple.Tuple
-import com.typesafe.config.ConfigFactory
+import scala.concurrent.{ExecutionContext, Await, Future}
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration._
 
 import bclconverter.reader.Reader.{Block, PRQData}
 
@@ -60,8 +63,7 @@ class MyOpts(rapipar : Int) extends Opts with Serializable {
 }
 
 object roba {
-  // val sref = "/u/cesco/dump/data/bam/c/chr1.fasta"
-  RapiUtils.loadPlugin()
+  RapiUtils.loadPlugin
   lazy val conf = ConfigFactory.load()
   var rapipar = 1
   val key1 = "rapi.rapipar"
@@ -95,11 +97,11 @@ class SomeData(r : String, rapipar : Int) extends Serializable {
     newHeader
   }
   def init = {
-    RapiUtils.loadPlugin 
-    opts = new MyOpts(rapipar)
+    RapiUtils.loadPlugin
+    val opts = new MyOpts(rapipar)
+    mapAligner = Stream.continually(new MyAlignerState(opts))
     ref = new MyRef(vr)
     header = createSamHeader(ref)
-    aligner = new MyAlignerState(opts)
   }
   // Serialization
   def readObject(in : java.io.ObjectInputStream) = {
@@ -113,12 +115,11 @@ class SomeData(r : String, rapipar : Int) extends Serializable {
   var opts : MyOpts = _
   var ref : MyRef = _
   var header : SAMFileHeader = _
-  var aligner : MyAlignerState = _
   var vr : String = r
-  // init(r)
+  var mapAligner : Stream[MyAlignerState] = _
 }
 
-class PRQ2SAMRecord[W <: Window](refPath : String) extends WindowFunction[(Int, PRQData), (Int, SAMRecordWritable), Tuple, W] { // with Serializable {
+class PRQ2SAMRecord[W <: Window](refPath : String) extends WindowFunction[(Int, PRQData), (Int, SAMRecordWritable), Tuple, W] {
   def alignOpToCigarElement(alnOp : AlignOp) : CigarElement = {
     val cigarOp = (alnOp.getType) match {
       case AlignOp.Type.Match => CigarOperator.M
@@ -210,7 +211,8 @@ class PRQ2SAMRecord[W <: Window](refPath : String) extends WindowFunction[(Int, 
       reads.append(new String(h, chr), new String(b2, chr), new String(q2, chr), RapiConstants.QENC_SANGER)
     }
     // align and get SAMRecord's
-    dati.aligner.alignReads(dati.ref, reads)
+    val mapal = dati.mapAligner(fn)
+    mapal.alignReads(dati.ref, reads)
     val sams = reads.flatMap(p => toRec2(p))
     println(s"#### reads:${reads.size}")
     sams.foreach(x => out.collect((fn, x)))

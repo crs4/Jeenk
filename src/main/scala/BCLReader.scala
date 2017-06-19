@@ -209,7 +209,7 @@ class Reader() extends Serializable {
       val houts = getHouts(lane, tile)
 
       val in = FP.fromElements(input)
-      val bcl = in.flatMap(new PRQreadBCL(rd))
+      val bcl = in.flatMap(new PRQreadBCL(rd)).rebalance
       val stuff = bcl
         .split {
 	input : (Block, Block, Block, Block) =>
@@ -228,14 +228,15 @@ class Reader() extends Serializable {
     }
     // send to kafka
     sendTOC
-    val stuff = input.flatMap(procReads)
+    val stuff = input
+      .flatMap(procReads)
     stuff.foreach(kafkize(jid))
     FP.execute
     // add EOS
     val k : Block = Array(13)
     val eos : PRQData = (k, k, k, k, k)
     val EOS : DataStream[PRQData] = FP.fromElements(eos)
-    // send EOS to each kafka partition
+    // send EOS to each kafka partition, for each topic
     (f2id.values ++ List(-1)).foreach{id =>
       Range(0, runReader.kafkapar).foreach{p =>
         FlinkKafkaProducer010.writeToKafkaWithTimestamps(

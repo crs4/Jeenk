@@ -36,8 +36,7 @@ class SAM2CRAM extends KeyIgnoringCRAMOutputFormat[LongWritable] {
     conf.set(CRAMInputFormat.REFERENCE_SOURCE_PATH_PROPERTY, ref)
     super.getRecordWriter(ctx)
   }
-  val head = new HPath("file:///u/cesco/dump/data/bam/coso.bam")
-  // val head = new HPath("file:///tmp/bam/coso.bam")
+  val head = new HPath(roba.header)
   val ref = "file://" + roba.sref
 }
 
@@ -65,17 +64,26 @@ class MyOpts(rapipar : Int) extends Opts with Serializable {
 object roba {
   RapiUtils.loadPlugin
   val conf = ConfigFactory.load()
+  // rapipar
   var rapipar = 1
   val key1 = "rapi.rapipar"
   if (conf.hasPath(key1))
     rapipar = conf.getString(key1).toInt
   val opts = new MyOpts(rapipar)
+  // reference
   var sref : String = _
   val key2 = "rapi.sref"
   if (conf.hasPath(key2))
     sref = conf.getString(key2)
   else
     throw new Error("rapi.sref undefined")
+  // header
+  var header : String = _
+  val key3 = "rapi.header"
+  if (conf.hasPath(key3))
+    sref = conf.getString(key3)
+  else
+    throw new Error("rapi.header undefined")
 }
 
 class SomeData(r : String, rapipar : Int) extends Serializable {
@@ -201,7 +209,7 @@ class PRQ2SAMRecord[W <: Window](refPath : String) extends WindowFunction[(Int, 
       reads.append(new String(h, chr), new String(b2, chr), new String(q2, chr), RapiConstants.QENC_SANGER)
     }
     // align and get SAMRecord's
-    val mapal = dati.mapAligner.head(fn)
+    val mapal = dati.mapAligner(fn)
     mapal.alignReads(dati.ref, reads)
     val sams = reads.flatMap(p => toRec2(p))
     println(s"#### reads:${reads.size}")

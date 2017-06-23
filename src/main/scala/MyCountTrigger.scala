@@ -1,13 +1,13 @@
 package bclconverter
 
-import org.apache.flink.streaming.api.scala._
-import org.apache.flink.streaming.api.windowing.triggers.{Trigger, TriggerResult}
-import org.apache.flink.streaming.api.windowing.triggers.Trigger.{TriggerContext, OnMergeContext}
 import org.apache.flink.annotation.PublicEvolving
 import org.apache.flink.api.common.functions.ReduceFunction
 import org.apache.flink.api.common.state.{ReducingState, ReducingStateDescriptor}
-import org.apache.flink.api.common.typeutils.base.LongSerializer
 import org.apache.flink.api.common.typeutils.TypeSerializer
+import org.apache.flink.api.common.typeutils.base.LongSerializer
+import org.apache.flink.streaming.api.scala._
+import org.apache.flink.streaming.api.windowing.triggers.Trigger.{TriggerContext, OnMergeContext}
+import org.apache.flink.streaming.api.windowing.triggers.{Trigger, TriggerResult}
 import org.apache.flink.streaming.api.windowing.windows.Window
 import scala.collection.JavaConversions._
 
@@ -27,6 +27,7 @@ class MyCountTrigger[W <: Window](maxCount : Long) extends Trigger[(Int, PRQData
     val c = count.get
     val chk = element._2._1.size
     if (c >= maxCount || chk == 1) {
+    // if (chk == 1) {
       count.clear()
       TriggerResult.FIRE_AND_PURGE
     }

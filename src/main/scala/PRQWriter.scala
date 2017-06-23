@@ -13,11 +13,20 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.api.scala.hadoop.mapreduce.HadoopOutputFormat
 import org.apache.flink.configuration.Configuration
+import org.apache.flink.runtime.state.filesystem.FsStateBackend
+import org.apache.flink.runtime.state.memory.MemoryStateBackend
+import org.apache.flink.streaming.api.TimeCharacteristic
+import org.apache.flink.streaming.api.functions.AssignerWithPeriodicWatermarks
 import org.apache.flink.streaming.api.scala._
+import org.apache.flink.streaming.api.watermark.Watermark
 import org.apache.flink.streaming.api.windowing.assigners.{TumblingEventTimeWindows, TumblingProcessingTimeWindows, GlobalWindows}
+import org.apache.flink.streaming.api.windowing.evictors.Evictor
+import org.apache.flink.streaming.api.windowing.evictors.Evictor.EvictorContext
 import org.apache.flink.streaming.api.windowing.time.Time
+import org.apache.flink.streaming.api.windowing.triggers.{CountTrigger, PurgingTrigger, Trigger}
 import org.apache.flink.streaming.api.windowing.windows.{Window, TimeWindow, GlobalWindow}
 import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer010, FlinkKafkaProducer010}
+import org.apache.flink.streaming.runtime.operators.windowing.TimestampedValue
 import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, KeyedDeserializationSchema}
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
@@ -32,11 +41,23 @@ import scala.collection.JavaConversions._
 import scala.collection.parallel._
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
-import org.apache.flink.streaming.api.windowing.evictors.Evictor
-import org.apache.flink.streaming.api.windowing.evictors.Evictor.EvictorContext
-import org.apache.flink.streaming.api.windowing.triggers.Trigger
-import org.apache.flink.streaming.runtime.operators.windowing.TimestampedValue
+
 import bclconverter.reader.Reader.{Block, PRQData}
+
+class MyWaterMarker extends AssignerWithPeriodicWatermarks[(Int, PRQData)] {
+  // var curr = 0
+  override def extractTimestamp(el: (Int, PRQData), prev: Long): Long = {
+    // curr += 1
+    val fn = el._1
+    if (fn != -1)
+      return System.currentTimeMillis //curr
+    else
+      return Long.MaxValue
+  }
+  override def getCurrentWatermark : Watermark = {
+    new Watermark(System.currentTimeMillis) //curr)
+  }
+}
 
 class MyEvictor[W <: Window] extends Evictor[(Int, PRQData), W] {
   override
@@ -56,7 +77,7 @@ class MyPRQDeserializer extends KeyedDeserializationSchema[(Int, PRQData)] {
   // Main methods
   override def getProducedType = TypeInformation.of(classOf[(Int, PRQData)])
   override def isEndOfStream(el : (Int, PRQData)) : Boolean = {
-    if (el._1 == -1){
+    if (el._1 == -2){
       println("EOS reached")
       true
     }
@@ -130,8 +151,13 @@ object Writer {
 class Writer(wd : WData) extends Serializable{
   // process tile, CRAM output, PRQ as intermediate format
   def kafka2cram(jid : Int, toc : Array[String]) = {
+    // val maxstate = 256*1024*1024
     val FP = StreamExecutionEnvironment.getExecutionEnvironment
     FP.setParallelism(wd.flinkpar)
+    FP.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
+    FP.enableCheckpointing(60000)
+    // FP.setStateBackend(new MemoryStateBackend(maxstate, true))
+    FP.setStateBackend(new FsStateBackend("file:///u/cesco/els/tmp/flink-state-backend", true))
     def finalizeOutput(p : String) = {
       val opath = new HPath(p)
       val job = Job.getInstance(new HConf)
@@ -144,29 +170,35 @@ class Writer(wd : WData) extends Serializable{
       val job = Job.getInstance(new HConf)
       MapreduceFileOutputFormat.setOutputPath(job, opath)
       val hof = new HadoopOutputFormat(new SAM2CRAM, job)
-      x._1.map(s => (new LongWritable(123), s)).writeUsingOutputFormat(hof).setParallelism(1)
+      x._1
+        .map(s => (new LongWritable(123), s))
+        .setParallelism(1)
+        .writeUsingOutputFormat(hof)
+        .setParallelism(1)
     }
     def readFromKafka : DataStream[(Int, PRQData)] = {
       val props = new ConsProps("outconsumer10.")
       // props.put("auto.offset.reset", "earliest")
       props.put("enable.auto.commit", "true")
-      props.put("auto.commit.interval.ms", "1000")
+      props.put("auto.commit.interval.ms", "60000")
       val cons = new FlinkKafkaConsumer010[(Int, PRQData)](wd.kafkaTopic + jid.toString, new MyPRQDeserializer, props)
+        .assignTimestampsAndWatermarks(new MyWaterMarker)
       val ds = FP
         .addSource(cons)
+        .setParallelism(1)
       ds
     }
     // start here
     val stuff = readFromKafka
     val sam = stuff
       .keyBy(0)
-      .window(GlobalWindows.create)
-      .trigger(MyCountTrigger.of(32*1024))
-      .evictor(new MyEvictor[GlobalWindow])
-      .apply(new PRQ2SAMRecord[GlobalWindow](roba.sref))
+      .window(TumblingEventTimeWindows.of(Time.seconds(20)))
+      .evictor(new MyEvictor[TimeWindow])
+      .apply(new PRQ2SAMRecord[TimeWindow](roba.sref))
+      .setParallelism(1)
     val filenames = toc.map(s => s.split(" ", 2))
     val splitted = sam.split(x => List(x._1.toString))
-    val jobs = filenames.map(f => (splitted.select(f.head).map(_._2), f.last))
+    val jobs = filenames.map(f => (splitted.select(f.head).map(_._2).setParallelism(1), f.last))
     jobs.foreach(writeToOF)
     FP.execute
     filenames.map(_.last).foreach(finalizeOutput)

@@ -27,7 +27,7 @@ import org.apache.flink.streaming.api.windowing.triggers.{CountTrigger, PurgingT
 import org.apache.flink.streaming.api.windowing.windows.{Window, TimeWindow, GlobalWindow}
 import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer010, FlinkKafkaProducer010}
 import org.apache.flink.streaming.runtime.operators.windowing.TimestampedValue
-import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, KeyedDeserializationSchema}
+import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, KeyedDeserializationSchema, DeserializationSchema}
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
 import org.apache.hadoop.io.compress.CompressionCodecFactory
@@ -44,12 +44,11 @@ import scala.concurrent.{ExecutionContext, Await, Future}
 
 import bclconverter.reader.Reader.{Block, PRQData}
 
-class MyWaterMarker extends AssignerWithPeriodicWatermarks[(Int, PRQData)] {
+class MyWaterMarker extends AssignerWithPeriodicWatermarks[PRQData] {
   // var curr = 0
-  override def extractTimestamp(el: (Int, PRQData), prev: Long): Long = {
+  override def extractTimestamp(el: PRQData, prev: Long): Long = {
     // curr += 1
-    val fn = el._1
-    if (fn != -1)
+    if (el._1.size != 1)
       return System.currentTimeMillis //curr
     else
       return Long.MaxValue
@@ -59,32 +58,38 @@ class MyWaterMarker extends AssignerWithPeriodicWatermarks[(Int, PRQData)] {
   }
 }
 
-class MyEvictor[W <: Window] extends Evictor[(Int, PRQData), W] {
+class MyEvictor[W <: Window] extends Evictor[PRQData, W] {
   override
-  def evictBefore(els : java.lang.Iterable[TimestampedValue[(Int, PRQData)]], size : Int, win : W, ec : EvictorContext) = {
+  def evictBefore(els : java.lang.Iterable[TimestampedValue[PRQData]], size : Int, win : W, ec : EvictorContext) = {
     var it = els.iterator
     while (it.hasNext) {
-      val e = it.next.getValue._2._1.size
+      val e = it.next.getValue._1.size
       if (e == 1)
         it.remove
     }    
   }
   override
-  def evictAfter(els : java.lang.Iterable[TimestampedValue[(Int, PRQData)]], size : Int, win : W, ec : EvictorContext) = {}
+  def evictAfter(els : java.lang.Iterable[TimestampedValue[PRQData]], size : Int, win : W, ec : EvictorContext) = {}
 }
 
-class MyPRQDeserializer extends KeyedDeserializationSchema[(Int, PRQData)] {
-  // Main methods
-  override def getProducedType = TypeInformation.of(classOf[(Int, PRQData)])
-  override def isEndOfStream(el : (Int, PRQData)) : Boolean = {
-    if (el._1 == -2){
-      println("EOS reached")
-      true
+class MyDeserializer extends DeserializationSchema[PRQData] {
+  override def getProducedType = TypeInformation.of(classOf[PRQData])
+  var eos1 = false
+  override def isEndOfStream(el : PRQData) : Boolean = {
+    if (el._1.size == 1) {
+      if (eos1) {
+        println("EOS reached")
+        true
+      } else
+      {
+        eos1 = true
+        false
+      }
     }
     else
       false
   }
-  override def deserialize(key : Array[Byte], data : Array[Byte], topic : String, partition : Int, offset : Long) : (Int, PRQData) = {
+  override def deserialize(data : Array[Byte]) : PRQData = {
     val (s1, r1) = data.splitAt(4)
     val (p1, d1) = r1.splitAt(toInt(s1))
     val (s2, r2) = d1.splitAt(4)
@@ -94,7 +99,7 @@ class MyPRQDeserializer extends KeyedDeserializationSchema[(Int, PRQData)] {
     val (s4, r4) = d3.splitAt(4)
     val (p4, d4) = r4.splitAt(toInt(s4))
     val (s5, p5) = d4.splitAt(4)
-    (toInt(key), (p1, p2, p3, p4, p5))
+    (p1, p2, p3, p4, p5)
   }
   def toInt(a : Array[Byte]) : Int = {
     ByteBuffer.wrap(a).getInt
@@ -176,32 +181,39 @@ class Writer(wd : WData) extends Serializable{
         .writeUsingOutputFormat(hof)
         .setParallelism(1)
     }
-    def readFromKafka : DataStream[(Int, PRQData)] = {
+    def readFromKafka(ids : Array[Int]) : Array[(Int, DataStream[PRQData])] = {
       val props = new ConsProps("outconsumer10.")
       // props.put("auto.offset.reset", "earliest")
       props.put("enable.auto.commit", "true")
       props.put("auto.commit.interval.ms", "60000")
-      val cons = new FlinkKafkaConsumer010[(Int, PRQData)](wd.kafkaTopic + jid.toString, new MyPRQDeserializer, props)
-        .assignTimestampsAndWatermarks(new MyWaterMarker)
-      val ds = FP
-        .addSource(cons)
-        .setParallelism(1)
-      ds
+      var r = Array[(Int, DataStream[PRQData])]()
+      for (id <- ids){
+        val cons = new FlinkKafkaConsumer010[PRQData](wd.kafkaTopic + jid.toString + "-" + id.toString, new MyDeserializer, props)
+          .assignTimestampsAndWatermarks(new MyWaterMarker)
+        val ds = FP
+          .addSource(cons)
+          .setParallelism(1)
+        r :+= (id, ds)
+      }
+      r
     }
     // start here
-    val stuff = readFromKafka
-    val sam = stuff
-      .keyBy(0)
-      .window(TumblingEventTimeWindows.of(Time.seconds(20)))
-      .evictor(new MyEvictor[TimeWindow])
-      .apply(new PRQ2SAMRecord[TimeWindow](roba.sref))
-      .setParallelism(1)
-    val filenames = toc.map(s => s.split(" ", 2))
-    val splitted = sam.split(x => List(x._1.toString))
-    val jobs = filenames.map(f => (splitted.select(f.head).map(_._2).setParallelism(1), f.last))
-    jobs.foreach(writeToOF)
+    val filenames = toc
+      .map(s => s.split(" ", 2))
+      .map(r => (r.head, r.last)).toMap
+    val ids = filenames.keys.map(_.toInt).toArray
+    val stuff = readFromKafka(ids)
+    stuff.par.foreach{x =>
+      val (id, ds) = x
+      val sam = ds
+        .timeWindowAll(Time.seconds(20))
+        .evictor(new MyEvictor[TimeWindow])
+        .apply(new PRQ2SAMRecord[TimeWindow](roba.sref))
+        // .setParallelism(1)
+      writeToOF(sam, filenames(id.toString))
+    }
     FP.execute
-    filenames.map(_.last).foreach(finalizeOutput)
+    filenames.values.foreach(finalizeOutput)
   }
 }
 
@@ -218,7 +230,7 @@ object runWriter {
     val rg = new scala.util.Random
     val cp = new ConsProps("conconsumer10.")
     // cp.put("auto.offset.reset", "earliest")
-    cp.put("enable.auto.commit", "true")
+      cp.put("enable.auto.commit", "true")
     cp.put("auto.commit.interval.ms", "1000")
     val conConsumer = new KafkaConsumer[Int, String](cp)
 

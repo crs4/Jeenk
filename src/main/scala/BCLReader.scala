@@ -36,25 +36,21 @@ import scala.concurrent.{ExecutionContext, Await, Future}
 import scala.io.Source
 import scala.xml.{XML, Node}
 
+import org.apache.flink.streaming.util.serialization.SerializationSchema
+
 import Reader.{Block, PRQData}
 
-class MyPRQSerializer(key : Int) extends KeyedSerializationSchema[PRQData] {
-  override def serializeKey(x : PRQData)  : Array[Byte] = {
-    return toBytes(key)
-  }
+class MySerializer extends SerializationSchema[PRQData] {
   def toBytes(i : Int) : Array[Byte] = {
     ByteBuffer.allocate(4).putInt(i).array
   }
-  override def serializeValue(x : PRQData)  : Array[Byte] = {
+  override def serialize(x : PRQData)  : Array[Byte] = {
     val r = toBytes(x._1.size) ++ x._1 ++
       toBytes(x._2.size) ++ x._2 ++
       toBytes(x._3.size) ++ x._3 ++
       toBytes(x._4.size) ++ x._4 ++
       toBytes(x._5.size) ++ x._5
     return r
-  }
-  override def getTargetTopic(x : PRQData) : String = {
-    return null
   }
 }
 
@@ -182,10 +178,10 @@ class Reader() extends Serializable {
       val key = x._2
       FlinkKafkaProducer010.writeToKafkaWithTimestamps(
         ds.javaStream,
-        rd.kafkaTopic + jid.toString,
-        new MyPRQSerializer(key),
-        new ProdProps("outproducer10."),
-        new MyPartitioner(runReader.kafkapar)
+        rd.kafkaTopic + jid.toString + "-" + key.toString,
+        new MySerializer,
+        new ProdProps("outproducer10.")//,
+        //new MyPartitioner(runReader.kafkapar)
       )
     }
     def getHouts(lane : Int, tile : Int) : Map[(Int, String), String] = {
@@ -235,17 +231,16 @@ class Reader() extends Serializable {
     // add EOS
     val k : Block = Array(13)
     val eos : PRQData = (k, k, k, k, k)
-    val EOS : DataStream[PRQData] = FP.fromElements(eos)
-    // send EOS to each kafka partition, for each topic
-    (f2id.values ++ List(-1, -2)).foreach{id =>
-    // (f2id.values).foreach{id =>
+    val EOS : DataStream[PRQData] = FP.fromElements(eos, eos)
+    // send double EOS to each kafka partition, for each topic
+    f2id.values.foreach{id =>
       Range(0, runReader.kafkapar).foreach{p =>
         FlinkKafkaProducer010.writeToKafkaWithTimestamps(
           EOS.javaStream,
-          rd.kafkaTopic + jid.toString,
-          new MyPRQSerializer(id),
-          new ProdProps("outproducer10."),
-          new MyPartitioner(runReader.kafkapar)
+          rd.kafkaTopic + jid.toString + "-" + id.toString,
+          new MySerializer,
+          new ProdProps("outproducer10.")//,
+          //new MyPartitioner(runReader.kafkapar)
         )
       }
     }

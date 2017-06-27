@@ -32,11 +32,11 @@ import bclconverter.reader.Reader.{Block, PRQData}
 class SAM2CRAM extends KeyIgnoringCRAMOutputFormat[LongWritable] {
   override def getRecordWriter(ctx : TaskAttemptContext) : RecordWriter[LongWritable, SAMRecordWritable] = {
     val conf = ctx.getConfiguration
-    readSAMHeaderFrom(head, conf)
+    readSAMHeaderFrom(myheader, conf)
     conf.set(CRAMInputFormat.REFERENCE_SOURCE_PATH_PROPERTY, ref)
     super.getRecordWriter(ctx)
   }
-  val head = new HPath(roba.header)
+  val myheader = new HPath(roba.header)
   val ref = "file://" + roba.sref
 }
 
@@ -81,7 +81,7 @@ object roba {
   var header : String = _
   val key3 = "rapi.header"
   if (conf.hasPath(key3))
-    sref = conf.getString(key3)
+    header = conf.getString(key3)
   else
     throw new Error("rapi.header undefined")
 }
@@ -107,18 +107,19 @@ class SomeData(r : String, rapipar : Int) extends Serializable {
   def init = {
     RapiUtils.loadPlugin
     val opts = new MyOpts(rapipar)
-    mapAligner = Stream.continually(new MyAlignerState(opts))
+    // mapAligner = Stream.continually(new MyAlignerState(opts))
+    aligner = new MyAlignerState(opts)
     ref = new MyRef(r)
     header = createSamHeader(ref)
   }
   // start here
   var ref : MyRef = _
   var header : SAMFileHeader = _
-  var mapAligner : Stream[MyAlignerState] = _
+  var aligner : MyAlignerState = _
+  // var mapAligner : Stream[MyAlignerState] = _
 }
 
-class PRQ2SAMRecord[W <: Window](refPath : String) extends WindowFunction[(Int, PRQData), (Int, SAMRecordWritable), Tuple, W] {
-  //with AllWindowFunction[(Int, PRQData), (Int, SAMRecordWritable), W] {
+class PRQ2SAMRecord[W <: Window](refPath : String) extends AllWindowFunction[PRQData, SAMRecordWritable, W] {
   def alignOpToCigarElement(alnOp : AlignOp) : CigarElement = {
     val cigarOp = (alnOp.getType) match {
       case AlignOp.Type.Match => CigarOperator.M
@@ -197,28 +198,26 @@ class PRQ2SAMRecord[W <: Window](refPath : String) extends WindowFunction[(Int, 
     r.set(out)
     r
   }
-  def doJob(fn : Int, in : Iterable[(Int, PRQData)], out : Collector[(Int, SAMRecordWritable)]) = {
+  def doJob(in : Iterable[PRQData], out : Collector[SAMRecordWritable]) = {
     // insert PRQ data
     val reads = new Batch(2)
     val chr = java.nio.charset.Charset.forName("US-ASCII")
     reads.reserve(in.size << 1)
-    in.map(_._2)
-      .foreach{ x =>
+    in.foreach{ x =>
       val (h, b1, q1, b2, q2) = x
       reads.append(new String(h, chr), new String(b1, chr), new String(q1, chr), RapiConstants.QENC_SANGER)
       reads.append(new String(h, chr), new String(b2, chr), new String(q2, chr), RapiConstants.QENC_SANGER)
     }
     // align and get SAMRecord's
-    val mapal = dati.mapAligner(fn)
+    val mapal = dati.aligner //mapAligner(fn)
     mapal.alignReads(dati.ref, reads)
     val sams = reads.flatMap(p => toRec2(p))
     println(s"#### reads:${reads.size}")
-    sams.foreach(x => out.collect((fn, x)))
+    sams.foreach(x => out.collect(x))
   }
-  def apply(key : Tuple, w : W, in : Iterable[(Int, PRQData)], out : Collector[(Int, SAMRecordWritable)]) = {
+  def apply(w : W, in : Iterable[PRQData], out : Collector[SAMRecordWritable]) = {
     // insert PRQ data
-    val fn : Int = key.getField(0)
-    doJob(fn, in, out)
+    doJob(in, out)
   }
   // Init
   var dati = new SomeData(refPath, roba.rapipar)

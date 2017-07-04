@@ -231,7 +231,7 @@ class Reader() extends Serializable {
     // add EOS
     val k : Block = Array(13)
     val eos : PRQData = (k, k, k, k, k)
-    val EOS : DataStream[PRQData] = FP.fromElements(eos, eos)
+    val EOS : DataStream[PRQData] = FP.fromElements(eos)
     // send double EOS to each kafka partition, for each topic
     f2id.values.foreach{id =>
       Range(0, runReader.kafkapar).foreach{p =>

@@ -40,7 +40,6 @@ class SAM2CRAM extends KeyIgnoringCRAMOutputFormat[LongWritable] {
   val ref = "file://" + roba.sref
 }
 
-
 class MidAlignerState(opts : Opts) extends AlignerState(opts) {
   def this() {
     this(roba.opts)
@@ -107,7 +106,6 @@ class SomeData(r : String, rapipar : Int) extends Serializable {
   def init = {
     RapiUtils.loadPlugin
     val opts = new MyOpts(rapipar)
-    // mapAligner = Stream.continually(new MyAlignerState(opts))
     aligner = new MyAlignerState(opts)
     ref = new MyRef(r)
     header = createSamHeader(ref)
@@ -116,7 +114,6 @@ class SomeData(r : String, rapipar : Int) extends Serializable {
   var ref : MyRef = _
   var header : SAMFileHeader = _
   var aligner : MyAlignerState = _
-  // var mapAligner : Stream[MyAlignerState] = _
 }
 
 class PRQ2SAMRecord[W <: Window](refPath : String) extends AllWindowFunction[PRQData, SAMRecordWritable, W] {
@@ -209,7 +206,7 @@ class PRQ2SAMRecord[W <: Window](refPath : String) extends AllWindowFunction[PRQ
       reads.append(new String(h, chr), new String(b2, chr), new String(q2, chr), RapiConstants.QENC_SANGER)
     }
     // align and get SAMRecord's
-    val mapal = dati.aligner //mapAligner(fn)
+    val mapal = dati.aligner
     mapal.alignReads(dati.ref, reads)
     val sams = reads.flatMap(p => toRec2(p))
     println(s"#### reads:${reads.size}")

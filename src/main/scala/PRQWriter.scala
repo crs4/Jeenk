@@ -45,16 +45,11 @@ import scala.concurrent.{ExecutionContext, Await, Future}
 import bclconverter.reader.Reader.{Block, PRQData}
 
 class MyWaterMarker extends AssignerWithPeriodicWatermarks[PRQData] {
-  // var curr = 0
   override def extractTimestamp(el: PRQData, prev: Long): Long = {
-    // curr += 1
-    if (el._1.size != 1)
-      return System.currentTimeMillis //curr
-    else
-      return Long.MaxValue
+    return System.currentTimeMillis
   }
   override def getCurrentWatermark : Watermark = {
-    new Watermark(System.currentTimeMillis) //curr)
+    new Watermark(System.currentTimeMillis)
   }
 }
 
@@ -74,17 +69,10 @@ class MyEvictor[W <: Window] extends Evictor[PRQData, W] {
 
 class MyDeserializer extends DeserializationSchema[PRQData] {
   override def getProducedType = TypeInformation.of(classOf[PRQData])
-  var eos1 = false
   override def isEndOfStream(el : PRQData) : Boolean = {
     if (el._1.size == 1) {
-      if (eos1) {
-        println("EOS reached")
-        true
-      } else
-      {
-        eos1 = true
-        false
-      }
+      println("EOS reached")
+      true
     }
     else
       false
@@ -126,7 +114,6 @@ class ConsProps(pref: String) extends Properties {
   def getCustomInt(key: String) = typesafeConfig.getInt(key)
 }
 
-
 class WData(param : ParameterTool) extends Serializable{
   // parameters
   var kafkaTopic : String = "prq"
@@ -160,7 +147,7 @@ class Writer(wd : WData) extends Serializable{
     val FP = StreamExecutionEnvironment.getExecutionEnvironment
     FP.setParallelism(wd.flinkpar)
     FP.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
-    FP.enableCheckpointing(60000)
+    FP.enableCheckpointing(10000)
     // FP.setStateBackend(new MemoryStateBackend(maxstate, true))
     FP.setStateBackend(new FsStateBackend("file:///u/cesco/els/tmp/flink-state-backend", true))
     def finalizeOutput(p : String) = {
@@ -185,11 +172,11 @@ class Writer(wd : WData) extends Serializable{
       val props = new ConsProps("outconsumer10.")
       // props.put("auto.offset.reset", "earliest")
       props.put("enable.auto.commit", "true")
-      props.put("auto.commit.interval.ms", "60000")
+      props.put("auto.commit.interval.ms", "10000")
       var r = Array[(Int, DataStream[PRQData])]()
       for (id <- ids){
         val cons = new FlinkKafkaConsumer010[PRQData](wd.kafkaTopic + jid.toString + "-" + id.toString, new MyDeserializer, props)
-          .assignTimestampsAndWatermarks(new MyWaterMarker)
+          // .assignTimestampsAndWatermarks(new MyWaterMarker)
         val ds = FP
           .addSource(cons)
           .setParallelism(1)
@@ -206,10 +193,8 @@ class Writer(wd : WData) extends Serializable{
     stuff.par.foreach{x =>
       val (id, ds) = x
       val sam = ds
-        .timeWindowAll(Time.seconds(20))
-        .evictor(new MyEvictor[TimeWindow])
+        .timeWindowAll(Time.seconds(30))
         .apply(new PRQ2SAMRecord[TimeWindow](roba.sref))
-        // .setParallelism(1)
       writeToOF(sam, filenames(id.toString))
     }
     FP.execute
@@ -230,7 +215,7 @@ object runWriter {
     val rg = new scala.util.Random
     val cp = new ConsProps("conconsumer10.")
     // cp.put("auto.offset.reset", "earliest")
-      cp.put("enable.auto.commit", "true")
+    cp.put("enable.auto.commit", "true")
     cp.put("auto.commit.interval.ms", "1000")
     val conConsumer = new KafkaConsumer[Int, String](cp)
 

@@ -140,6 +140,13 @@ object Writer {
   }
 }
 
+// class MyHadoopOutputFormat(s2c : SAM2CRAM, job : Job) extends HadoopOutputFormat(s2c, job) {
+//   def closeRW = {
+//     val rw = mapreduceOutputFormat.getRecordWriter(context)
+//     rw.close(context)
+//   }
+// }
+
 class Writer(wd : WData) extends Serializable{
   // process tile, CRAM output, PRQ as intermediate format
   def kafka2cram(jid : Int, toc : Array[String]) = {
@@ -150,18 +157,13 @@ class Writer(wd : WData) extends Serializable{
     FP.enableCheckpointing(10000)
     // FP.setStateBackend(new MemoryStateBackend(maxstate, true))
     FP.setStateBackend(new FsStateBackend("file:///u/cesco/els/tmp/flink-state-backend", true))
-    def finalizeOutput(p : String) = {
-      val opath = new HPath(p)
-      val job = Job.getInstance(new HConf)
-      MapreduceFileOutputFormat.setOutputPath(job, opath)
-      val hof = new HadoopOutputFormat(new SAM2CRAM, job)
-      hof.finalizeGlobal(1)
-    }
+    var ofs = List[HadoopOutputFormat[LongWritable, SAMRecordWritable]]()
     def writeToOF(x : (DataStream[SAMRecordWritable], String)) = {
       val opath = new HPath(x._2)
       val job = Job.getInstance(new HConf)
       MapreduceFileOutputFormat.setOutputPath(job, opath)
       val hof = new HadoopOutputFormat(new SAM2CRAM, job)
+      ofs ::= hof
       x._1
         .map(s => (new LongWritable(123), s))
         .setParallelism(1)
@@ -198,7 +200,7 @@ class Writer(wd : WData) extends Serializable{
       writeToOF(sam, filenames(id.toString))
     }
     FP.execute
-    filenames.values.foreach(finalizeOutput)
+    ofs.par.foreach(_.finalizeGlobal(1))
   }
 }
 

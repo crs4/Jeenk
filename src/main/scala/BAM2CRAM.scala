@@ -30,11 +30,23 @@ import bclconverter.reader.Reader.{Block, PRQData}
 
 // Writer from SAMRecordWritable to CRAM format
 class SAM2CRAM extends KeyIgnoringCRAMOutputFormat[LongWritable] {
-  override def getRecordWriter(ctx : TaskAttemptContext) : RecordWriter[LongWritable, SAMRecordWritable] = {
+  override def getRecordWriter(ctx : TaskAttemptContext, out : HPath) : RecordWriter[LongWritable, SAMRecordWritable] = {
     val conf = ctx.getConfiguration
     readSAMHeaderFrom(myheader, conf)
+    setWriteHeader(true)
     conf.set(CRAMInputFormat.REFERENCE_SOURCE_PATH_PROPERTY, ref)
-    super.getRecordWriter(ctx)
+    super.getRecordWriter(ctx, out)
+  }
+  val myheader = new HPath(roba.header)
+  val ref = "file://" + roba.sref
+}
+
+class SAM2BAM extends KeyIgnoringBAMOutputFormat[LongWritable] {
+  override def getRecordWriter(ctx : TaskAttemptContext, out : HPath) : RecordWriter[LongWritable, SAMRecordWritable] = {
+    val conf = ctx.getConfiguration
+    readSAMHeaderFrom(myheader, conf)
+    setWriteHeader(true)
+    super.getRecordWriter(ctx, out)
   }
   val myheader = new HPath(roba.header)
   val ref = "file://" + roba.sref
@@ -180,7 +192,7 @@ class PRQ2SAMRecord[W <: Window](refPath : String) extends AllWindowFunction[PRQ
           out.setMateUnmappedFlag(false)
         }
         else
-          out.setMateUnmappedFlag(false)
+          out.setMateUnmappedFlag(true)
       }
       // tags
       out.setAttribute("NM", new Integer(aln.getNMismatches))
@@ -189,7 +201,7 @@ class PRQ2SAMRecord[W <: Window](refPath : String) extends AllWindowFunction[PRQ
         out.setAttribute(entry.getKey, entry.getValue)
     }
     else {
-      out.setReadUnmappedFlag(false)
+      out.setReadUnmappedFlag(true)
     }
     val r = new SAMRecordWritable
     r.set(out)

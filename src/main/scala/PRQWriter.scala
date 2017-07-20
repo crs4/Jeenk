@@ -13,6 +13,7 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.api.scala.hadoop.mapreduce.HadoopOutputFormat
 import org.apache.flink.configuration.Configuration
+import org.apache.flink.core.fs.FileSystem.WriteMode
 import org.apache.flink.runtime.state.filesystem.FsStateBackend
 import org.apache.flink.runtime.state.memory.MemoryStateBackend
 import org.apache.flink.streaming.api.TimeCharacteristic
@@ -23,7 +24,7 @@ import org.apache.flink.streaming.api.windowing.assigners.{TumblingEventTimeWind
 import org.apache.flink.streaming.api.windowing.evictors.Evictor
 import org.apache.flink.streaming.api.windowing.evictors.Evictor.EvictorContext
 import org.apache.flink.streaming.api.windowing.time.Time
-import org.apache.flink.streaming.api.windowing.triggers.{CountTrigger, PurgingTrigger, Trigger}
+import org.apache.flink.streaming.api.windowing.triggers.{CountTrigger, PurgingTrigger, Trigger, EventTimeTrigger}
 import org.apache.flink.streaming.api.windowing.windows.{Window, TimeWindow, GlobalWindow}
 import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer010, FlinkKafkaProducer010}
 import org.apache.flink.streaming.runtime.operators.windowing.TimestampedValue
@@ -171,12 +172,12 @@ class Writer(wd : WData) extends Serializable{
         .setParallelism(1)
     }
     def readFromKafka(ids : Array[Int]) : Array[(Int, DataStream[PRQData])] = {
-      val props = new ConsProps("outconsumer10.")
-      // props.put("auto.offset.reset", "earliest")
-      props.put("enable.auto.commit", "true")
-      props.put("auto.commit.interval.ms", "10000")
       var r = Array[(Int, DataStream[PRQData])]()
       for (id <- ids){
+        val props = new ConsProps("outconsumer10.")
+        // props.put("auto.offset.reset", "earliest")
+        props.put("enable.auto.commit", "true")
+        props.put("auto.commit.interval.ms", "10000")
         val cons = new FlinkKafkaConsumer010[PRQData](wd.kafkaTopic + jid.toString + "-" + id.toString, new MyDeserializer, props)
           // .assignTimestampsAndWatermarks(new MyWaterMarker)
         val ds = FP

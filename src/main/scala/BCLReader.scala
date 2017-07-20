@@ -12,11 +12,13 @@ import org.apache.flink.api.common.io.OutputFormat
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.api.scala.hadoop.mapreduce.HadoopOutputFormat
 import org.apache.flink.configuration.Configuration
+import org.apache.flink.core.fs.FileSystem.WriteMode
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.windowing.assigners.TumblingEventTimeWindows
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer010
 import org.apache.flink.streaming.connectors.kafka.partitioner.KafkaPartitioner
+import org.apache.flink.streaming.util.serialization.SerializationSchema
 import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, SimpleStringSchema}
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
@@ -36,8 +38,6 @@ import scala.concurrent.{ExecutionContext, Await, Future}
 import scala.io.Source
 import scala.xml.{XML, Node}
 
-import org.apache.flink.streaming.util.serialization.SerializationSchema
-
 import Reader.{Block, PRQData}
 
 class MySerializer extends SerializationSchema[PRQData] {
@@ -52,6 +52,21 @@ class MySerializer extends SerializationSchema[PRQData] {
       toBytes(x._5.size) ++ x._5
     return r
   }
+}
+class MyKSerializer(jid : Int) extends KeyedSerializationSchema[PRQData] {
+  def toBytes(i : Int) : Array[Byte] = {
+    ByteBuffer.allocate(4).putInt(i).array
+  }
+  override def serializeValue(x : PRQData) : Array[Byte] = {
+    val r = toBytes(x._1.size) ++ x._1 ++
+      toBytes(x._2.size) ++ x._2 ++
+      toBytes(x._3.size) ++ x._3 ++
+      toBytes(x._4.size) ++ x._4 ++
+      toBytes(x._5.size) ++ x._5
+    return r
+  }
+  override def serializeKey(x : PRQData) : Array[Byte] = null
+  override def getTargetTopic(x : PRQData) : String = null
 }
 
 class MyPartitioner(max : Int) extends KafkaPartitioner[PRQData] {

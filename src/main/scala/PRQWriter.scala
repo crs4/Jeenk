@@ -24,7 +24,8 @@ import org.apache.flink.streaming.api.windowing.assigners.{TumblingEventTimeWind
 import org.apache.flink.streaming.api.windowing.evictors.Evictor
 import org.apache.flink.streaming.api.windowing.evictors.Evictor.EvictorContext
 import org.apache.flink.streaming.api.windowing.time.Time
-import org.apache.flink.streaming.api.windowing.triggers.{CountTrigger, PurgingTrigger, Trigger, EventTimeTrigger}
+import org.apache.flink.streaming.api.windowing.triggers.{TriggerResult, CountTrigger, PurgingTrigger, Trigger, EventTimeTrigger}
+import org.apache.flink.streaming.api.windowing.triggers.Trigger.TriggerContext
 import org.apache.flink.streaming.api.windowing.windows.{Window, TimeWindow, GlobalWindow}
 import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer010, FlinkKafkaProducer010}
 import org.apache.flink.streaming.runtime.operators.windowing.TimestampedValue
@@ -42,15 +43,41 @@ import scala.collection.JavaConversions._
 import scala.collection.parallel._
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
+import scala.math.max
+
+import java.io.{File, PrintWriter}
 
 import bclconverter.reader.Reader.{Block, PRQData}
 
+class MyTrigger[W <: Window] extends Trigger[PRQData, W] {
+  override def clear(win: W, ctx: TriggerContext): Unit = {
+  }
+  override def onElement(el: PRQData, timestamp: Long, win: W, ctx: TriggerContext): TriggerResult = {
+    if (el._1.size > 1) // (timestamp != Long.MaxValue)
+      TriggerResult.CONTINUE
+    else
+      TriggerResult.FIRE_AND_PURGE
+  }
+  override def onEventTime(x$1: Long,x$2: W,x$3: TriggerContext): TriggerResult = {
+    TriggerResult.CONTINUE
+  }
+  override def onProcessingTime(x$1: Long,x$2: W,x$3: TriggerContext): TriggerResult = {
+    TriggerResult.CONTINUE
+  }
+}
+
 class MyWaterMarker extends AssignerWithPeriodicWatermarks[PRQData] {
+  val out = 1000l
+  var cur = 0l
   override def extractTimestamp(el: PRQData, prev: Long): Long = {
-    return System.currentTimeMillis
+    cur = prev
+    if (el._1.size > 1)
+      return prev
+    else
+      return Long.MaxValue
   }
   override def getCurrentWatermark : Watermark = {
-    new Watermark(System.currentTimeMillis)
+    new Watermark(cur - out)
   }
 }
 
@@ -69,14 +96,25 @@ class MyEvictor[W <: Window] extends Evictor[PRQData, W] {
 }
 
 class MyDeserializer extends DeserializationSchema[PRQData] {
+  var eos = false
   override def getProducedType = TypeInformation.of(classOf[PRQData])
   override def isEndOfStream(el : PRQData) : Boolean = {
-    if (el._1.size == 1) {
-      println("EOS reached")
-      true
-    }
-    else
+    //*
+    if (el._1.size > 1)
       false
+    else
+      true
+    //*/
+    /*
+    if (el._1.size > 1)
+      false
+    else if (eos)
+      true
+    else {
+      eos = true
+      false
+    }
+    */
   }
   override def deserialize(data : Array[Byte]) : PRQData = {
     val (s1, r1) = data.splitAt(4)
@@ -141,45 +179,57 @@ object Writer {
   }
 }
 
-// class MyHadoopOutputFormat(s2c : SAM2CRAM, job : Job) extends HadoopOutputFormat(s2c, job) {
-//   def closeRW = {
-//     val rw = mapreduceOutputFormat.getRecordWriter(context)
-//     rw.close(context)
-//   }
-// }
-
 class Writer(wd : WData) extends Serializable{
   // process tile, CRAM output, PRQ as intermediate format
   def kafka2cram(jid : Int, toc : Array[String]) = {
-    // val maxstate = 256*1024*1024
     val FP = StreamExecutionEnvironment.getExecutionEnvironment
     FP.setParallelism(wd.flinkpar)
     FP.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
-    FP.enableCheckpointing(10000)
+    // FP.enableCheckpointing(10000)
+    // val maxstate = 256*1024*1024
     // FP.setStateBackend(new MemoryStateBackend(maxstate, true))
     FP.setStateBackend(new FsStateBackend("file:///u/cesco/els/tmp/flink-state-backend", true))
-    var ofs = List[HadoopOutputFormat[LongWritable, SAMRecordWritable]]()
+    var ofs = List[HadoopOutputFormat[NullWritable, SAMRecordWritable]]()
     def writeToOF(x : (DataStream[SAMRecordWritable], String)) = {
       val opath = new HPath(x._2)
       val job = Job.getInstance(new HConf)
       MapreduceFileOutputFormat.setOutputPath(job, opath)
       val hof = new HadoopOutputFormat(new SAM2CRAM, job)
+      val nw : NullWritable = null
       ofs ::= hof
+      // write to cram
       x._1
-        .map(s => (new LongWritable(123), s))
+        .map(s => (nw, s))
         .setParallelism(1)
         .writeUsingOutputFormat(hof)
+        .setParallelism(1)
+    }
+    def writeCount(x : (DataStream[SAMRecordWritable], String)) = {
+      val filename = x._2.replaceAll("[/:]","_")
+      val ds = x._1
+      ds
+        .map(_ => 1)
+        .writeAsText(s"/u/cesco/els/data/out/count/${filename}.txt")
+        .setParallelism(1)
+    }
+    def writeCount2(x : (DataStream[PRQData], String)) = {
+      val filename = x._2.replaceAll("[/:]","_")
+      val ds = x._1
+      ds
+        .map(_ => 1)
+        .writeAsText(s"/u/cesco/els/data/out/count/${filename}.txt")
         .setParallelism(1)
     }
     def readFromKafka(ids : Array[Int]) : Array[(Int, DataStream[PRQData])] = {
       var r = Array[(Int, DataStream[PRQData])]()
       for (id <- ids){
         val props = new ConsProps("outconsumer10.")
-        // props.put("auto.offset.reset", "earliest")
+        props.put("auto.offset.reset", "earliest")
         props.put("enable.auto.commit", "true")
         props.put("auto.commit.interval.ms", "10000")
-        val cons = new FlinkKafkaConsumer010[PRQData](wd.kafkaTopic + jid.toString + "-" + id.toString, new MyDeserializer, props)
-          // .assignTimestampsAndWatermarks(new MyWaterMarker)
+        val name = wd.kafkaTopic + jid.toString + "-" + id.toString
+        val cons = new FlinkKafkaConsumer010[PRQData](name, new MyDeserializer, props)
+          .assignTimestampsAndWatermarks(new MyWaterMarker)
         val ds = FP
           .addSource(cons)
           .setParallelism(1)
@@ -193,15 +243,20 @@ class Writer(wd : WData) extends Serializable{
       .map(r => (r.head, r.last)).toMap
     val ids = filenames.keys.map(_.toInt).toArray
     val stuff = readFromKafka(ids)
-    stuff.par.foreach{x =>
+    stuff.foreach{x =>
       val (id, ds) = x
+      // writeCount2(ds, filenames(id.toString))
       val sam = ds
+        // .countWindowAll(32*1024)
         .timeWindowAll(Time.seconds(30))
+        // .windowAll(GlobalWindows.create)
+        // .evictor(new MyEvictor)
+        // .trigger(new MyTrigger)
         .apply(new PRQ2SAMRecord[TimeWindow](roba.sref))
       writeToOF(sam, filenames(id.toString))
     }
     FP.execute
-    ofs.par.foreach(_.finalizeGlobal(1))
+    ofs.foreach(_.finalizeGlobal(1))
   }
 }
 
@@ -217,7 +272,7 @@ object runWriter {
 
     val rg = new scala.util.Random
     val cp = new ConsProps("conconsumer10.")
-    // cp.put("auto.offset.reset", "earliest")
+    cp.put("auto.offset.reset", "earliest")
     cp.put("enable.auto.commit", "true")
     cp.put("auto.commit.interval.ms", "1000")
     val conConsumer = new KafkaConsumer[Int, String](cp)

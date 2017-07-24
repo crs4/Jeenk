@@ -29,8 +29,8 @@ import scala.concurrent.{ExecutionContext, Await, Future}
 import bclconverter.reader.Reader.{Block, PRQData}
 
 // Writer from SAMRecordWritable to CRAM format
-class SAM2CRAM extends KeyIgnoringCRAMOutputFormat[LongWritable] {
-  override def getRecordWriter(ctx : TaskAttemptContext, out : HPath) : RecordWriter[LongWritable, SAMRecordWritable] = {
+class SAM2CRAM extends KeyIgnoringCRAMOutputFormat[NullWritable] {
+  override def getRecordWriter(ctx : TaskAttemptContext, out : HPath) : RecordWriter[NullWritable, SAMRecordWritable] = {
     val conf = ctx.getConfiguration
     readSAMHeaderFrom(myheader, conf)
     setWriteHeader(true)
@@ -41,8 +41,8 @@ class SAM2CRAM extends KeyIgnoringCRAMOutputFormat[LongWritable] {
   val ref = "file://" + roba.sref
 }
 
-class SAM2BAM extends KeyIgnoringBAMOutputFormat[LongWritable] {
-  override def getRecordWriter(ctx : TaskAttemptContext, out : HPath) : RecordWriter[LongWritable, SAMRecordWritable] = {
+class SAM2BAM extends KeyIgnoringBAMOutputFormat[NullWritable] {
+  override def getRecordWriter(ctx : TaskAttemptContext, out : HPath) : RecordWriter[NullWritable, SAMRecordWritable] = {
     val conf = ctx.getConfiguration
     readSAMHeaderFrom(myheader, conf)
     setWriteHeader(true)

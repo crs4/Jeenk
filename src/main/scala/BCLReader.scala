@@ -92,6 +92,9 @@ class ProdProps(pref : String) extends Properties {
       put(key.replace(pref, ""), typesafeConfig.getString(key))
   }
   put("client.id", "robo" + ProdProps.rg.nextLong.toString)
+  put("retries", "5")
+  put("max.in.flight.requests.per.connection", "1")
+
 
   def getCustomString(key: String) = typesafeConfig.getString(key)
   def getCustomInt(key: String) = typesafeConfig.getInt(key)
@@ -191,13 +194,20 @@ class Reader() extends Serializable {
     def kafkize(jid : Int)(x : (DataStream[PRQData], Int)) = {
       val ds = (x._1)
       val key = x._2
+      val name = rd.kafkaTopic + jid.toString + "-" + key.toString
       FlinkKafkaProducer010.writeToKafkaWithTimestamps(
         ds.javaStream,
-        rd.kafkaTopic + jid.toString + "-" + key.toString,
+        name,
         new MySerializer,
         new ProdProps("outproducer10.")//,
         //new MyPartitioner(runReader.kafkapar)
       )
+      /* check how many data are sent
+      ds
+        .map(_ => 1)
+        .writeAsText(s"/u/cesco/els/data/out/count/${name}.txt")
+        .setParallelism(1)
+      */
     }
     def getHouts(lane : Int, tile : Int) : Map[(Int, String), String] = {
       var houts = sampleMap.filterKeys(_._1 == lane)
@@ -243,11 +253,10 @@ class Reader() extends Serializable {
       .flatMap(procReads)
     stuff.foreach(kafkize(jid))
     FP.execute
-    // add EOS
+    // send (double?) EOS to each kafka partition, for each topic
     val k : Block = Array(13)
     val eos : PRQData = (k, k, k, k, k)
     val EOS : DataStream[PRQData] = FP.fromElements(eos)
-    // send double EOS to each kafka partition, for each topic
     f2id.values.foreach{id =>
       Range(0, runReader.kafkapar).foreach{p =>
         FlinkKafkaProducer010.writeToKafkaWithTimestamps(

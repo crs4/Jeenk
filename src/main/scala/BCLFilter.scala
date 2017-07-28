@@ -215,7 +215,7 @@ class BCLstream(flist : Array[HPath], bsize : Int) {
     val in = fs.open(path)
     in.seek(len - 4)
     val buf = new Array[Byte](4)
-    in.read(buf)
+    Tools.readItAll(in,buf)
     val r = ByteBuffer.wrap(buf).order(ByteOrder.LITTLE_ENDIAN).getInt
     in.close
     r
@@ -258,7 +258,7 @@ class Filter(path : HPath, bsize : Int) {
   filfile.seek(12)
   val buf = new Array[Byte](bsize)
   def readBlock : Iterator[Byte] = {
-    val bs = filfile.read(buf)
+    val bs = Tools.readItAll(filfile,buf)
     buf.toIterator
   }
   var curblock = Iterator[Byte]()
@@ -279,7 +279,7 @@ class Control(path : HPath, bsize : Int) {
   confile.seek(12)
   val buf = new Array[Byte](bsize)
   def readBlock : Iterator[Block] = {
-    val bs = confile.read(buf)
+    val bs = Tools.readItAll(confile,buf)
     buf.take(bs)
       .sliding(2, 2).map{ x =>
       val con = ByteBuffer.wrap(x).order(ByteOrder.LITTLE_ENDIAN).getShort
@@ -303,7 +303,7 @@ class Clocs(path : HPath) {
   val locsfile = fs.open(path)
   locsfile.seek(1)
   val buf = new Array[Byte](4)
-  locsfile.read(buf)
+  Tools.readItAll(locsfile,buf)
   val numbins = ByteBuffer.wrap(buf).order(ByteOrder.LITTLE_ENDIAN).getInt
   def readBin(n : Int) : Iterator[Block] = {
     val dx = (1000.5 + (n % 82) * 250).toInt
@@ -336,7 +336,7 @@ class Locs(path : HPath, bsize : Int) {
   locsfile.seek(12)
   val buf = new Array[Byte](bsize)
   def readBlock : Iterator[Block] = {
-    val bs = locsfile.read(buf)
+    val bs = Tools.readItAll(locsfile,buf)
     val bb = ByteBuffer.wrap(buf, 0, bs).order(ByteOrder.LITTLE_ENDIAN)
     val r = for (i <- Range(0, bs >> 3)) yield {
       val x = bb.getFloat
@@ -360,3 +360,22 @@ class Locs(path : HPath, bsize : Int) {
   }
 }
 
+object Tools {
+  // Read data into buf until is full or EOF is reached
+  // Returns number of read bytes
+  def readItAll(in : FSDataInputStream, buf : Array[Byte]) : Int = {
+    val max = buf.size
+    var read = 0
+    var eof = false
+    while (read != max && !eof){
+      // keep reading until buffer is filled
+      val r = in.read(buf, read, max - read)
+      if (r >= 0)
+	read += r
+      else
+	eof = true
+    }
+    return read
+  }
+}
+ 

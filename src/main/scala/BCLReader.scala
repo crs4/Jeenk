@@ -202,12 +202,6 @@ class Reader() extends Serializable {
         new ProdProps("outproducer10.")//,
         //new MyPartitioner(runReader.kafkapar)
       )
-      /* check how many data are sent
-      ds
-        .map(_ => 1)
-        .writeAsText(s"/u/cesco/els/data/out/count/${name}.txt")
-        .setParallelism(1)
-      */
     }
     def getHouts(lane : Int, tile : Int) : Map[(Int, String), String] = {
       var houts = sampleMap.filterKeys(_._1 == lane)

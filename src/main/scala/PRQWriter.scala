@@ -163,6 +163,7 @@ class WData(param : ParameterTool) extends Serializable{
   flinkpar = param.getInt("writerflinkpar", flinkpar)
   kafkaTopic = param.get("kafkaTopic", kafkaTopic)
   kafkaControl = param.get("kafkaControl", kafkaControl)
+  val stateBE = param.getRequired("stateBE")
 }
 
 object Writer {
@@ -179,84 +180,56 @@ object Writer {
   }
 }
 
-class Writer(wd : WData) extends Serializable{
-  // process tile, CRAM output, PRQ as intermediate format
-  def kafka2cram(jid : Int, toc : Array[String]) = {
+class miniWriter(id : Int, topicname : String, filename : String, wd : WData) {
+  def writeToOF(x : (DataStream[SAMRecordWritable], String)) : HadoopOutputFormat[LongWritable, SAMRecordWritable] = {
+    val opath = new HPath(x._2)
+    val job = Job.getInstance(new HConf)
+    MapreduceFileOutputFormat.setOutputPath(job, opath)
+    val hof = new HadoopOutputFormat(new SAM2CRAM, job)
+    // write to cram
+    x._1
+      .map(s => (new LongWritable(0), s))
+      .setParallelism(1)
+      .writeUsingOutputFormat(hof)
+      .setParallelism(1)
+    return hof
+  }
+  def go = {
     val FP = StreamExecutionEnvironment.getExecutionEnvironment
     FP.setParallelism(wd.flinkpar)
     FP.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
-    // FP.enableCheckpointing(10000)
-    // val maxstate = 256*1024*1024
-    // FP.setStateBackend(new MemoryStateBackend(maxstate, true))
-    FP.setStateBackend(new FsStateBackend("file:///u/cesco/els/tmp/flink-state-backend", true))
-    var ofs = List[HadoopOutputFormat[NullWritable, SAMRecordWritable]]()
-    def writeToOF(x : (DataStream[SAMRecordWritable], String)) = {
-      val opath = new HPath(x._2)
-      val job = Job.getInstance(new HConf)
-      MapreduceFileOutputFormat.setOutputPath(job, opath)
-      val hof = new HadoopOutputFormat(new SAM2CRAM, job)
-      val nw : NullWritable = null
-      ofs ::= hof
-      // write to cram
-      x._1
-        .map(s => (nw, s))
-        .setParallelism(1)
-        .writeUsingOutputFormat(hof)
-        .setParallelism(1)
-    }
-    def writeCount(x : (DataStream[SAMRecordWritable], String)) = {
-      val filename = x._2.replaceAll("[/:]","_")
-      val ds = x._1
-      ds
-        .map(_ => 1)
-        .writeAsText(s"/u/cesco/els/data/out/count/${filename}.txt")
-        .setParallelism(1)
-    }
-    def writeCount2(x : (DataStream[PRQData], String)) = {
-      val filename = x._2.replaceAll("[/:]","_")
-      val ds = x._1
-      ds
-        .map(_ => 1)
-        .writeAsText(s"/u/cesco/els/data/out/count/${filename}.txt")
-        .setParallelism(1)
-    }
-    def readFromKafka(ids : Array[Int]) : Array[(Int, DataStream[PRQData])] = {
-      var r = Array[(Int, DataStream[PRQData])]()
-      for (id <- ids){
-        val props = new ConsProps("outconsumer10.")
-        props.put("auto.offset.reset", "earliest")
-        props.put("enable.auto.commit", "true")
-        props.put("auto.commit.interval.ms", "10000")
-        val name = wd.kafkaTopic + jid.toString + "-" + id.toString
-        val cons = new FlinkKafkaConsumer010[PRQData](name, new MyDeserializer, props)
-          .assignTimestampsAndWatermarks(new MyWaterMarker)
-        val ds = FP
-          .addSource(cons)
-          .setParallelism(1)
-        r :+= (id, ds)
-      }
-      r
-    }
-    // start here
+    FP.enableCheckpointing(10000)
+    FP.setStateBackend(new FsStateBackend(wd.stateBE, true))
+    val props = new ConsProps("outconsumer10.")
+    props.put("auto.offset.reset", "earliest")
+    props.put("enable.auto.commit", "true")
+    props.put("auto.commit.interval.ms", "10000")
+    val cons = new FlinkKafkaConsumer010[PRQData](topicname, new MyDeserializer, props)
+    // .assignTimestampsAndWatermarks(new MyWaterMarker)
+    val ds = FP
+      .addSource(cons)
+      .setParallelism(1)
+    val sam = ds
+      .timeWindowAll(Time.seconds(10))
+      .apply(new PRQ2SAMRecord[TimeWindow](roba.sref))
+    val hof = writeToOF(sam, filename)
+    FP.execute
+    hof.finalizeGlobal(1)
+  }
+}
+
+class Writer(wd : WData) extends Serializable{
+  def kafka2cram(jid : Int, toc : Array[String]) : Iterable[miniWriter] = {
     val filenames = toc
       .map(s => s.split(" ", 2))
       .map(r => (r.head, r.last)).toMap
-    val ids = filenames.keys.map(_.toInt).toArray
-    val stuff = readFromKafka(ids)
-    stuff.foreach{x =>
-      val (id, ds) = x
-      // writeCount2(ds, filenames(id.toString))
-      val sam = ds
-        // .countWindowAll(32*1024)
-        .timeWindowAll(Time.seconds(30))
-        // .windowAll(GlobalWindows.create)
-        // .evictor(new MyEvictor)
-        // .trigger(new MyTrigger)
-        .apply(new PRQ2SAMRecord[TimeWindow](roba.sref))
-      writeToOF(sam, filenames(id.toString))
+    def RW(id : Int) : miniWriter = {
+      val topicname = wd.kafkaTopic + jid.toString + "-" + id.toString
+      new miniWriter(id, topicname, filenames(id.toString), wd)
     }
-    FP.execute
-    ofs.foreach(_.finalizeGlobal(1))
+    // start here
+    val ids = filenames.keys.map(_.toInt)
+    ids.map(id => RW(id))
   }
 }
 
@@ -269,6 +242,7 @@ object runWriter {
     // implicit val timeout = Timeout(30 seconds)
 
     val wd = new WData(param)
+    val rw = new Writer(wd)
 
     val rg = new scala.util.Random
     val cp = new ConsProps("conconsumer10.")
@@ -281,11 +255,13 @@ object runWriter {
     var jobs = List[Future[Any]]()
     while (true) {
       val records = conConsumer.poll(3000)
-      records.foreach(r => println("Adding job " + r.key))
-      jobs ++= records.map(r => Future{
-        val rw = new Writer(wd)
-        rw.kafka2cram(r.key, r.value.split("\n"))
-      })
+      records.foreach(r => println("Adding jobs " + r.key))
+      jobs ++= records.flatMap
+      {
+	r =>
+	  rw.kafka2cram(r.key, r.value.split("\n"))
+	    .map(j => Future{j.go})
+      }
     }
     conConsumer.close
   }

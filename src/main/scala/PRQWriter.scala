@@ -35,7 +35,7 @@ import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, 
 import org.apache.hadoop.io.compress.CompressionCodecFactory
 import org.apache.hadoop.io.compress.zlib.{ZlibCompressor, ZlibFactory}
 import org.apache.hadoop.io.{NullWritable, LongWritable}
-import org.apache.hadoop.mapreduce.lib.output.{FileOutputFormat => MapreduceFileOutputFormat}
+import org.apache.hadoop.mapreduce.lib.output.{FileOutputFormat => MapreduceFileOutputFormat, NullOutputFormat}
 import org.apache.hadoop.mapreduce.{Job, RecordWriter, TaskAttemptContext}
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.seqdoop.hadoop_bam.{AnySAMInputFormat, CRAMInputFormat, SAMRecordWritable, KeyIgnoringCRAMOutputFormat, KeyIgnoringCRAMRecordWriter, KeyIgnoringBAMOutputFormat, KeyIgnoringBAMRecordWriter}
@@ -182,10 +182,11 @@ object Writer {
 
 class miniWriter(id : Int, topicname : String, filename : String, wd : WData) {
   def writeToOF(x : (DataStream[SAMRecordWritable], String)) : HadoopOutputFormat[LongWritable, SAMRecordWritable] = {
-    val opath = new HPath(x._2)
+    val opath = new HPath(x._2 + ".cram")
     val job = Job.getInstance(new HConf)
     MapreduceFileOutputFormat.setOutputPath(job, opath)
     val hof = new HadoopOutputFormat(new SAM2CRAM, job)
+    // val hof = new HadoopOutputFormat(new NullOutputFormat[LongWritable, SAMRecordWritable], job)
     // write to cram
     x._1
       .map(s => (new LongWritable(0), s))
@@ -210,8 +211,13 @@ class miniWriter(id : Int, topicname : String, filename : String, wd : WData) {
       .addSource(cons)
       .setParallelism(1)
     val sam = ds
-      .timeWindowAll(Time.seconds(10))
+      .timeWindowAll(Time.seconds(1))
       .apply(new PRQ2SAMRecord[TimeWindow](roba.sref))
+    // bogus alignment
+    //val sam = ds
+    //  .timeWindowAll(Time.seconds(10))
+    //  .apply(new bogus[TimeWindow])
+
     val hof = writeToOF(sam, filename)
     FP.execute
     hof.finalizeGlobal(1)

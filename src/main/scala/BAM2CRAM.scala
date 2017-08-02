@@ -20,11 +20,13 @@ import org.apache.hadoop.mapreduce.lib.input.{FileInputFormat => MapreduceFileIn
 import org.apache.hadoop.mapreduce.lib.output.{FileOutputFormat => MapreduceFileOutputFormat}
 import org.apache.hadoop.mapreduce.{Job, RecordWriter, TaskAttemptContext}
 import org.seqdoop.hadoop_bam.util.SAMHeaderReader
-import org.seqdoop.hadoop_bam.{AnySAMInputFormat, CRAMInputFormat, SAMRecordWritable, KeyIgnoringCRAMOutputFormat, KeyIgnoringCRAMRecordWriter, KeyIgnoringBAMOutputFormat, KeyIgnoringBAMRecordWriter}
+import org.seqdoop.hadoop_bam.{AnySAMInputFormat, CRAMInputFormat, SAMRecordWritable, KeyIgnoringCRAMOutputFormat, KeyIgnoringCRAMRecordWriter, KeyIgnoringBAMOutputFormat, KeyIgnoringBAMRecordWriter, KeyIgnoringAnySAMOutputFormat}
 import scala.collection.JavaConversions._
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
+
+import org.seqdoop.hadoop_bam.SAMFormat
 
 import bclconverter.reader.Reader.{Block, PRQData}
 
@@ -49,8 +51,18 @@ class SAM2BAM extends KeyIgnoringBAMOutputFormat[LongWritable] {
     super.getRecordWriter(ctx, out)
   }
   val myheader = new HPath(roba.header)
-  val ref = "file://" + roba.sref
 }
+
+class SAM2SAM extends KeyIgnoringAnySAMOutputFormat[LongWritable](SAMFormat.valueOf("SAM")) {
+  override def getRecordWriter(ctx : TaskAttemptContext, out : HPath) : RecordWriter[LongWritable, SAMRecordWritable] = {
+    val conf = ctx.getConfiguration
+    readSAMHeaderFrom(myheader, conf)
+    setWriteHeader(true)
+    super.getRecordWriter(ctx, out)
+  }
+  val myheader = new HPath(roba.header)
+}
+
 
 class MidAlignerState(opts : Opts) extends AlignerState(opts) {
   def this() {
@@ -126,6 +138,13 @@ class SomeData(r : String, rapipar : Int) extends Serializable {
   var ref : MyRef = _
   var header : SAMFileHeader = _
   var aligner : MyAlignerState = _
+}
+
+
+class bogus[W <: Window] extends AllWindowFunction[PRQData, SAMRecordWritable, W] {
+  def apply(w : W, in : Iterable[PRQData], out : Collector[SAMRecordWritable]) = {
+    in.foreach(x => out.collect(new SAMRecordWritable))
+  }
 }
 
 class PRQ2SAMRecord[W <: Window](refPath : String) extends AllWindowFunction[PRQData, SAMRecordWritable, W] {

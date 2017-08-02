@@ -206,9 +206,9 @@ class Reader() extends Serializable {
     def getHouts(lane : Int, tile : Int) : Map[(Int, String), String] = {
       var houts = sampleMap.filterKeys(_._1 == lane)
         .map {
-	case (k, pref) => ((k._1, k._2) -> new String(f"${rd.fout}${pref}/${pref}_L${k._1}%03d_${tile}.cram"))
+	case (k, pref) => ((k._1, k._2) -> new String(f"${rd.fout}${pref}/${pref}_L${k._1}%03d_${tile}"))
       }
-      houts += (lane, rd.undet) -> new String(f"${rd.fout}${rd.undet}/${rd.undet}_L${lane}%03d_${tile}.cram")
+      houts += (lane, rd.undet) -> new String(f"${rd.fout}${rd.undet}/${rd.undet}_L${lane}%03d_${tile}")
       houts
     }
     def sendTOC = {

@@ -67,17 +67,18 @@ class MyTrigger[W <: Window] extends Trigger[PRQData, W] {
 }
 
 class MyWaterMarker extends AssignerWithPeriodicWatermarks[PRQData] {
-  val out = 1000l
   var cur = 0l
   override def extractTimestamp(el: PRQData, prev: Long): Long = {
-    cur = prev
-    if (el._1.size > 1)
-      return prev
-    else
-      return Long.MaxValue
+    val r = cur
+    cur += 1
+    return r
+    // if (el._1.size > 1)
+    //   return r
+    // else
+    //   return Long.MaxValue
   }
   override def getCurrentWatermark : Watermark = {
-    new Watermark(cur - out)
+    new Watermark(cur - 1)
   }
 }
 
@@ -160,6 +161,7 @@ class WData(param : ParameterTool) extends Serializable{
   var flinkpar = 1
   val root = param.getRequired("root")
   val fout = param.getRequired("fout")
+  val rapiwin = param.getInt("rapiwin", 1024)
   flinkpar = param.getInt("writerflinkpar", flinkpar)
   kafkaTopic = param.get("kafkaTopic", kafkaTopic)
   kafkaControl = param.get("kafkaControl", kafkaControl)
@@ -206,12 +208,13 @@ class miniWriter(id : Int, topicname : String, filename : String, wd : WData) {
     props.put("enable.auto.commit", "true")
     props.put("auto.commit.interval.ms", "10000")
     val cons = new FlinkKafkaConsumer010[PRQData](topicname, new MyDeserializer, props)
-    // .assignTimestampsAndWatermarks(new MyWaterMarker)
+      .assignTimestampsAndWatermarks(new MyWaterMarker)
     val ds = FP
       .addSource(cons)
       .setParallelism(1)
     val sam = ds
-      .timeWindowAll(Time.seconds(1))
+      .timeWindowAll(Time.milliseconds(wd.rapiwin))
+      // .evictor(new MyEvictor)
       .apply(new PRQ2SAMRecord[TimeWindow](roba.sref))
     // bogus alignment
     //val sam = ds

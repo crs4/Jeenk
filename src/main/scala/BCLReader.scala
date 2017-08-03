@@ -250,7 +250,7 @@ class Reader() extends Serializable {
     // send (double?) EOS to each kafka partition, for each topic
     val k : Block = Array(13)
     val eos : PRQData = (k, k, k, k, k)
-    val EOS : DataStream[PRQData] = FP.fromElements(eos)
+    val EOS : DataStream[PRQData] = FP.fromElements(eos) //, eos)
     f2id.values.foreach{id =>
       Range(0, runReader.kafkapar).foreach{p =>
         FlinkKafkaProducer010.writeToKafkaWithTimestamps(

@@ -162,6 +162,7 @@ class WData(param : ParameterTool) extends Serializable{
   val root = param.getRequired("root")
   val fout = param.getRequired("fout")
   val rapiwin = param.getInt("rapiwin", 1024)
+  // val writergroup = param.getInt("writergroup", 4)
   flinkpar = param.getInt("writerflinkpar", flinkpar)
   kafkaTopic = param.get("kafkaTopic", kafkaTopic)
   kafkaControl = param.get("kafkaControl", kafkaControl)
@@ -182,7 +183,16 @@ object Writer {
   }
 }
 
-class miniWriter(id : Int, topicname : String, filename : String, wd : WData) {
+class miniWriter(wd : WData) {
+  // initialize stream environment
+  val FP = StreamExecutionEnvironment.getExecutionEnvironment
+  FP.setParallelism(wd.flinkpar)
+  FP.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
+  FP.enableCheckpointing(10000)
+  FP.setStateBackend(new FsStateBackend(wd.stateBE, true))
+  var jobs = List[(Int, String, String)]()
+  var hofs = List[HadoopOutputFormat[LongWritable, SAMRecordWritable]]()
+  // functions
   def writeToOF(x : (DataStream[SAMRecordWritable], String)) : HadoopOutputFormat[LongWritable, SAMRecordWritable] = {
     val opath = new HPath(x._2 + ".cram")
     val job = Job.getInstance(new HConf)
@@ -197,12 +207,13 @@ class miniWriter(id : Int, topicname : String, filename : String, wd : WData) {
       .setParallelism(1)
     return hof
   }
-  def go = {
-    val FP = StreamExecutionEnvironment.getExecutionEnvironment
-    FP.setParallelism(wd.flinkpar)
-    FP.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
-    FP.enableCheckpointing(10000)
-    FP.setStateBackend(new FsStateBackend(wd.stateBE, true))
+  def add(id : Int, topicname : String, filename : String) {
+    jobs ::= (id, topicname, filename)
+  }
+  def finalizeAll = {
+    hofs.foreach(hof => hof.finalizeGlobal(1))
+  }
+  def doJob(id : Int, topicname : String, filename : String) = {
     val props = new ConsProps("outconsumer10.")
     props.put("auto.offset.reset", "earliest")
     props.put("enable.auto.commit", "true")
@@ -221,9 +232,12 @@ class miniWriter(id : Int, topicname : String, filename : String, wd : WData) {
     //  .timeWindowAll(Time.seconds(10))
     //  .apply(new bogus[TimeWindow])
 
-    val hof = writeToOF(sam, filename)
+    hofs ::= writeToOF(sam, filename)
+  }
+  def go = {
+    jobs.foreach(j => doJob(j._1, j._2, j._3))
     FP.execute
-    hof.finalizeGlobal(1)
+    finalizeAll
   }
 }
 
@@ -232,13 +246,18 @@ class Writer(wd : WData) extends Serializable{
     val filenames = toc
       .map(s => s.split(" ", 2))
       .map(r => (r.head, r.last)).toMap
-    def RW(id : Int) : miniWriter = {
-      val topicname = wd.kafkaTopic + jid.toString + "-" + id.toString
-      new miniWriter(id, topicname, filenames(id.toString), wd)
+    def RW(ids : Iterable[Int]) : miniWriter = {
+      val mw = new miniWriter(wd)
+      ids.foreach{
+        id =>
+        val topicname = wd.kafkaTopic + jid.toString + "-" + id.toString
+        mw.add(id, topicname, filenames(id.toString))
+      }
+      mw
     }
     // start here
     val ids = filenames.keys.map(_.toInt)
-    ids.map(id => RW(id))
+    ids.grouped(wd.flinkpar).map(lid => RW(lid)).toIterable
   }
 }
 

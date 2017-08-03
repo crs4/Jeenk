@@ -281,7 +281,7 @@ class Control(path : HPath, bsize : Int) {
   def readBlock : Iterator[Block] = {
     val bs = Tools.readItAll(confile,buf)
     buf.take(bs)
-      .sliding(2, 2).map{ x =>
+      .grouped(2).map{ x =>
       val con = ByteBuffer.wrap(x).order(ByteOrder.LITTLE_ENDIAN).getShort
       s"$con:".getBytes
     }

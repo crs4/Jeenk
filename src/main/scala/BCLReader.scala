@@ -335,7 +335,7 @@ object runReader {
    
     val w = reader.getAllJobs
     val jnum = reader.rd.jnum
-    val tasks = w.sliding(jnum, jnum).map(x => Future{reader.BCLprocess(x)})
+    val tasks = w.grouped(jnum).map(x => Future{reader.BCLprocess(x)})
     val aggregated = Future.sequence(tasks)
     Await.result(aggregated, Duration.Inf)
     Reader.conProducer.close

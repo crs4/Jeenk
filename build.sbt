@@ -2,7 +2,7 @@ name := "bcl-converter"
 version := "0.1"
 scalaVersion := "2.10.5" //"2.11.8"
 
-val fver = "1.3.1" //"1.2.1" //"1.4-SNAPSHOT" 
+val fver = "1.3.2" //"1.2.1" //"1.4-SNAPSHOT" 
 
 // resolvers += Resolver.mavenLocal
 // resolvers += "apache-snapshot" at "https://repository.apache.org/content/repositories/snapshots/"

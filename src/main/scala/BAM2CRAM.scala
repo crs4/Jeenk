@@ -3,30 +3,17 @@ package bclconverter
 import com.typesafe.config.ConfigFactory
 import htsjdk.samtools.{SAMProgramRecord, SAMRecord, CigarOperator, Cigar, CigarElement, SAMFileHeader, SAMSequenceRecord}
 import it.crs4.rapi.{Alignment, AlignOp, Contig, Read, Fragment, Batch, Ref, AlignerState, Rapi, RapiUtils, RapiConstants, Opts}
-import org.apache.flink.api.common.functions.{MapFunction, FlatMapFunction, ReduceFunction, GroupReduceFunction}
-import org.apache.flink.api.common.io.OutputFormat
 import org.apache.flink.api.java.tuple.Tuple
-import org.apache.flink.api.java.utils.ParameterTool
-import org.apache.flink.api.scala.hadoop.mapreduce.{HadoopOutputFormat, HadoopInputFormat}
-import org.apache.flink.configuration.Configuration
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.function.{WindowFunction, AllWindowFunction}
 import org.apache.flink.streaming.api.windowing.windows.{Window, GlobalWindow, TimeWindow}
 import org.apache.flink.util.Collector
-import org.apache.hadoop.conf.{Configuration => HConf}
-import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
+import org.apache.hadoop.fs.{Path => HPath}
 import org.apache.hadoop.io.{NullWritable, LongWritable}
-import org.apache.hadoop.mapreduce.lib.input.{FileInputFormat => MapreduceFileInputFormat}
-import org.apache.hadoop.mapreduce.lib.output.{FileOutputFormat => MapreduceFileOutputFormat}
 import org.apache.hadoop.mapreduce.{Job, RecordWriter, TaskAttemptContext}
-import org.seqdoop.hadoop_bam.util.SAMHeaderReader
+import org.seqdoop.hadoop_bam.SAMFormat
 import org.seqdoop.hadoop_bam.{AnySAMInputFormat, CRAMInputFormat, SAMRecordWritable, KeyIgnoringCRAMOutputFormat, KeyIgnoringCRAMRecordWriter, KeyIgnoringBAMOutputFormat, KeyIgnoringBAMRecordWriter, KeyIgnoringAnySAMOutputFormat}
 import scala.collection.JavaConversions._
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.duration._
-import scala.concurrent.{ExecutionContext, Await, Future}
-
-import org.seqdoop.hadoop_bam.SAMFormat
 
 import bclconverter.reader.Reader.{Block, PRQData}
 
@@ -147,7 +134,7 @@ class bogus[W <: Window] extends AllWindowFunction[PRQData, SAMRecordWritable, W
   }
 }
 
-class PRQ2SAMRecord[W <: Window](refPath : String) extends AllWindowFunction[PRQData, SAMRecordWritable, W] {
+class PRQ2SAMRecord[W <: Window](refPath : String) extends WindowFunction[(Int, PRQData), SAMRecordWritable, Tuple, W] {
   def alignOpToCigarElement(alnOp : AlignOp) : CigarElement = {
     val cigarOp = (alnOp.getType) match {
       case AlignOp.Type.Match => CigarOperator.M
@@ -243,9 +230,10 @@ class PRQ2SAMRecord[W <: Window](refPath : String) extends AllWindowFunction[PRQ
     println(s"#### reads:${reads.size}")
     sams.foreach(x => out.collect(x))
   }
-  def apply(w : W, in : Iterable[PRQData], out : Collector[SAMRecordWritable]) = {
+  def apply(key : Tuple, w : W, in : Iterable[(Int, PRQData)], out : Collector[SAMRecordWritable]) = {
     // insert PRQ data
-    doJob(in, out)
+    val s = in.map(_._2)
+    doJob(s, out)
   }
   // Init
   var dati = new SomeData(refPath, roba.rapipar)

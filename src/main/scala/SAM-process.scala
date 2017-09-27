@@ -1,4 +1,4 @@
-package bclconverter
+package bclconverter.aligner
 
 import com.typesafe.config.ConfigFactory
 import htsjdk.samtools.{SAMProgramRecord, SAMRecord, CigarOperator, Cigar, CigarElement, SAMFileHeader, SAMSequenceRecord}

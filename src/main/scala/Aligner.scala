@@ -93,23 +93,20 @@ class ConsProps(pref: String) extends Properties {
   def getCustomInt(key: String) = typesafeConfig.getInt(key)
 }
 
-class WData(param : ParameterTool) extends Serializable{
+class PList(param : ParameterTool) extends Serializable{
   // parameters
-  var kafkaTopic : String = "prq"
-  var kafkaControl : String = "kcon"
-  var flinkpar = 1
-  var kafkapar = 1
-  var wgrouping = 1
   val root = param.getRequired("root")
   val fout = param.getRequired("fout")
   val rapiwin = param.getInt("rapiwin", 1024)
-  // val writergroup = param.getInt("writergroup", 4)
-  flinkpar = param.getInt("writerflinkpar", flinkpar)
-  kafkapar = param.getInt("kafkapar", kafkapar)
-  wgrouping = param.getInt("wgrouping", wgrouping)
-  kafkaTopic = param.get("kafkaTopic", kafkaTopic)
-  kafkaControl = param.get("kafkaControl", kafkaControl)
+  val flinkpar = param.getInt("writerflinkpar", 1)
+  val kafkapar = param.getInt("kafkapar", 1)
+  val rapipar = param.getInt("rapipar", 1)
+  val wgrouping = param.getInt("wgrouping", 1)
+  val kafkaTopic = param.get("kafkaTopic", "flink-prq")
+  val kafkaControl = param.get("kafkaControl", "flink-con")
   val stateBE = param.getRequired("stateBE")
+  val sref = param.getRequired("reference")
+  val header = param.getRequired("header")
 }
 
 object Writer {
@@ -126,21 +123,29 @@ object Writer {
   }
 }
 
-class miniWriter(wd : WData) {
+class miniWriter(pl : PList) extends Serializable {
   // initialize stream environment
   val FP = StreamExecutionEnvironment.getExecutionEnvironment
-  FP.setParallelism(wd.flinkpar)
+  FP.setParallelism(pl.flinkpar)
   FP.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
   FP.enableCheckpointing(10000)
-  FP.setStateBackend(new FsStateBackend(wd.stateBE, true))
+  FP.setStateBackend(new FsStateBackend(pl.stateBE, true))
   var jobs = List[(Int, String, String)]()
   var hofs = List[HadoopOutputFormat[LongWritable, SAMRecordWritable]]()
+  var s2c = new SAM2CRAM(pl.header, "file://" + pl.sref)
   // functions
+  // private def writeObject(out : java.io.ObjectOutputStream) {
+  //   out.writeObject(s2c)
+  // }
+  // private def readObject(in : java.io.ObjectInputStream){
+  //   s2c = in.readObject.asInstanceOf[SAM2CRAM]
+  //   println(s"head: ${pl.header} -- ref: ${pl.sref}")
+  // }
   def writeToOF(x : (DataStream[SAMRecordWritable], String)) : HadoopOutputFormat[LongWritable, SAMRecordWritable] = {
     val opath = new HPath(x._2 + ".cram")
     val job = Job.getInstance(new HConf)
     MapreduceFileOutputFormat.setOutputPath(job, opath)
-    val hof = new HadoopOutputFormat(new SAM2CRAM, job)
+    val hof = new MyCRAMOutputFormat(s2c, job)
     // val hof = new HadoopOutputFormat(new NullOutputFormat[LongWritable, SAMRecordWritable], job)
     // write to cram
     x._1
@@ -163,12 +168,11 @@ class miniWriter(wd : WData) {
       .assignTimestampsAndWatermarks(new MyWaterMarker[(Int, PRQData)])
     val ds = FP
       .addSource(cons)
-      .setParallelism(wd.kafkapar)
+      .setParallelism(pl.kafkapar)
     val sam = ds
       .keyBy(0)
-      .timeWindow(Time.milliseconds(wd.rapiwin))
-      .apply(new PRQ2SAMRecord[TimeWindow](roba.sref))
-      // .apply(new bogus[TimeWindow])
+      .timeWindow(Time.milliseconds(pl.rapiwin))
+      .apply(new PRQ2SAMRecord[TimeWindow](pl.sref, pl.rapipar))
 
     hofs ::= writeToOF(sam, filename)
   }
@@ -179,23 +183,23 @@ class miniWriter(wd : WData) {
   }
 }
 
-class Writer(wd : WData) extends Serializable{
+class Writer(pl : PList) {
   def kafka2cram(toc : Array[String]) : Iterable[miniWriter] = {
     val filenames = toc
       .map(s => s.split(" ", 2))
       .map(r => (r.head, r.last)).toMap
     def RW(ids : Iterable[Int]) : miniWriter = {
-      val mw = new miniWriter(wd)
+      val mw = new miniWriter(pl)
       ids.foreach{
         id =>
-        val topicname = wd.kafkaTopic + "-" + id.toString
+        val topicname = pl.kafkaTopic + "-" + id.toString
         mw.add(id, topicname, filenames(id.toString))
       }
       mw
     }
     // start here
     val ids = filenames.keys.map(_.toInt)
-    ids.grouped(wd.wgrouping).map(lid => RW(lid)).toIterable
+    ids.grouped(pl.wgrouping).map(lid => RW(lid)).toIterable
   }
 }
 
@@ -207,8 +211,8 @@ object runWriter {
     implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
     // implicit val timeout = Timeout(30 seconds)
 
-    val wd = new WData(param)
-    val rw = new Writer(wd)
+    val pl = new PList(param)
+    val rw = new Writer(pl)
 
     val rg = new scala.util.Random
     val cp = new ConsProps("conconsumer10.")
@@ -217,7 +221,7 @@ object runWriter {
     cp.put("auto.commit.interval.ms", "1000")
     val conConsumer = new KafkaConsumer[Void, String](cp)
 
-    conConsumer.subscribe(List(wd.kafkaControl))
+    conConsumer.subscribe(List(pl.kafkaControl))
     var jobs = List[Future[Any]]()
     while (true) {
       val records = conConsumer.poll(3000)

@@ -167,8 +167,8 @@ class Reader() extends Serializable {
         ds.javaStream,
         name,
         new MyKSerializer,
-        new ProdProps("outproducer10.")//,
-        // new MyPartitioner(runReader.kafkapar)
+        new ProdProps("outproducer10."),
+        new MyPartitioner(runReader.kafkapar)
       )
     }
     def procReads(input : (Int, Int)) : Seq[(DataStream[PRQData], Int)] = {

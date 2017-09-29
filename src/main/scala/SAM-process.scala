@@ -4,10 +4,12 @@ import com.typesafe.config.ConfigFactory
 import htsjdk.samtools.{SAMProgramRecord, SAMRecord, CigarOperator, Cigar, CigarElement, SAMFileHeader, SAMSequenceRecord}
 import it.crs4.rapi.{Alignment, AlignOp, Contig, Read, Fragment, Batch, Ref, AlignerState, Rapi, RapiUtils, RapiConstants, Opts}
 import org.apache.flink.api.java.tuple.Tuple
+import org.apache.flink.api.scala.hadoop.mapreduce.HadoopOutputFormat
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.function.{WindowFunction, AllWindowFunction}
 import org.apache.flink.streaming.api.windowing.windows.{Window, GlobalWindow, TimeWindow}
 import org.apache.flink.util.Collector
+import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{Path => HPath}
 import org.apache.hadoop.io.{NullWritable, LongWritable}
 import org.apache.hadoop.mapreduce.{Job, RecordWriter, TaskAttemptContext}
@@ -17,19 +19,48 @@ import scala.collection.JavaConversions._
 
 import bclconverter.reader.Reader.{Block, PRQData}
 
+class MyCRAMOutputFormat(s2c : SAM2CRAM, job : Job) extends HadoopOutputFormat[LongWritable, SAMRecordWritable](s2c, job) {
+  private def writeObject(out : java.io.ObjectOutputStream) {
+    configuration.write(out)
+    out.writeObject(mapreduceOutputFormat)
+  }
+  private def readObject(in : java.io.ObjectInputStream){
+    configuration = new HConf
+    configuration.readFields(in)
+    mapreduceOutputFormat = in.readObject.asInstanceOf[SAM2CRAM]
+  }
+}
+
+
 // Writer from SAMRecordWritable to CRAM format
-class SAM2CRAM extends KeyIgnoringCRAMOutputFormat[LongWritable] {
+class SAM2CRAM(var head : String, var ref : String) extends KeyIgnoringCRAMOutputFormat[LongWritable] with Serializable {
+  def this() = this(null, null)
+  var headpath : HPath = _
   override def getRecordWriter(ctx : TaskAttemptContext, out : HPath) : RecordWriter[LongWritable, SAMRecordWritable] = {
     val conf = ctx.getConfiguration
-    readSAMHeaderFrom(myheader, conf)
+    readSAMHeaderFrom(headpath, conf)
     setWriteHeader(true)
     conf.set(CRAMInputFormat.REFERENCE_SOURCE_PATH_PROPERTY, ref)
     super.getRecordWriter(ctx, out)
   }
-  val myheader = new HPath(roba.header)
-  val ref = "file://" + roba.sref
+  private def writeObject(out : java.io.ObjectOutputStream) {
+    out.writeObject(head)
+    out.writeObject(ref)
+  }
+  private def readObject(in : java.io.ObjectInputStream){
+    head = in.readObject.asInstanceOf[String]
+    ref = in.readObject.asInstanceOf[String]
+    init
+  }
+  def init {
+    if (head != null)
+      headpath = new HPath(head)
+  }
+  // start
+  init
 }
 
+/************************
 class SAM2BAM extends KeyIgnoringBAMOutputFormat[LongWritable] {
   override def getRecordWriter(ctx : TaskAttemptContext, out : HPath) : RecordWriter[LongWritable, SAMRecordWritable] = {
     val conf = ctx.getConfiguration
@@ -49,54 +80,41 @@ class SAM2SAM extends KeyIgnoringAnySAMOutputFormat[LongWritable](SAMFormat.valu
   }
   val myheader = new HPath(roba.header)
 }
+******************************/
 
-
-class MidAlignerState(opts : Opts) extends AlignerState(opts) {
-  def this() {
-    this(roba.opts)
+class MyRef(var s : String) extends Ref with Serializable {
+  private def writeObject(out : java.io.ObjectOutputStream) {
+    out.writeObject(s)
   }
-}
-class MyAlignerState(opts : Opts) extends MidAlignerState(opts) with Serializable {
-}
-class MidRef(s : String) extends Ref(s) {
-  def this() {
-    this(roba.sref)
+  private def readObject(in : java.io.ObjectInputStream){
+    s = in.readObject.asInstanceOf[String]
+    load(s)
   }
-}
-class MyRef(s : String) extends MidRef(s) with Serializable {
-}
-class MyOpts(rapipar : Int) extends Opts with Serializable {
-  setShareRefMem(true)
-  setNThreads(rapipar)
-  Rapi.init(this)
+  load(s)
 }
 
-object roba {
+class MyOpts(var rapipar : Int) extends Opts with Serializable {
+  private def writeObject(out : java.io.ObjectOutputStream) {
+    out.writeInt(rapipar)
+  }
+  private def readObject(in : java.io.ObjectInputStream){
+    rapipar = in.readInt
+    init
+  }
+  def init {
+    setShareRefMem(true)
+    setNThreads(rapipar)
+    Rapi.init(this)
+  }
+  init
+}
+
+object rapiStuff {
   RapiUtils.loadPlugin
-  val conf = ConfigFactory.load()
-  // rapipar
-  var rapipar = 1
-  val key1 = "rapi.rapipar"
-  if (conf.hasPath(key1))
-    rapipar = conf.getString(key1).toInt
-  val opts = new MyOpts(rapipar)
-  // reference
-  var sref : String = _
-  val key2 = "rapi.sref"
-  if (conf.hasPath(key2))
-    sref = conf.getString(key2)
-  else
-    throw new Error("rapi.sref undefined")
-  // header
-  var header : String = _
-  val key3 = "rapi.header"
-  if (conf.hasPath(key3))
-    header = conf.getString(key3)
-  else
-    throw new Error("rapi.header undefined")
+  def init {}
 }
 
-class SomeData(r : String, rapipar : Int) extends Serializable {
+class SomeData(var r : String, var rapipar : Int) extends Serializable {
   def createSamHeader(rapiRef : Ref) : SAMFileHeader = {
     def convertContig(rapiContig : Contig) : SAMSequenceRecord = {
       val sr = new SAMSequenceRecord(rapiContig.getName, rapiContig.getLen.toInt)
@@ -114,27 +132,30 @@ class SomeData(r : String, rapipar : Int) extends Serializable {
     newHeader.addProgramRecord(new SAMProgramRecord("Myname ver x.y.z with " + rapiVerStr))
     newHeader
   }
+  private def writeObject(out : java.io.ObjectOutputStream) {
+    out.writeObject(r)
+    out.writeInt(rapipar)
+  }
+  private def readObject(in : java.io.ObjectInputStream){
+    r = in.readObject.asInstanceOf[String]
+    rapipar = in.readInt
+    init
+  }
   def init = {
     RapiUtils.loadPlugin
     val opts = new MyOpts(rapipar)
-    aligner = new MyAlignerState(opts)
+    aligner = new AlignerState(opts)
     ref = new MyRef(r)
     header = createSamHeader(ref)
   }
   // start here
   var ref : MyRef = _
   var header : SAMFileHeader = _
-  var aligner : MyAlignerState = _
+  var aligner : AlignerState = _
 }
 
 
-class bogus[W <: Window] extends AllWindowFunction[PRQData, SAMRecordWritable, W] {
-  def apply(w : W, in : Iterable[PRQData], out : Collector[SAMRecordWritable]) = {
-    in.foreach(x => out.collect(new SAMRecordWritable))
-  }
-}
-
-class PRQ2SAMRecord[W <: Window](refPath : String) extends WindowFunction[(Int, PRQData), SAMRecordWritable, Tuple, W] {
+class PRQ2SAMRecord[W <: Window](refPath : String, rapipar : Int) extends WindowFunction[(Int, PRQData), SAMRecordWritable, Tuple, W] {
   def alignOpToCigarElement(alnOp : AlignOp) : CigarElement = {
     val cigarOp = (alnOp.getType) match {
       case AlignOp.Type.Match => CigarOperator.M
@@ -236,6 +257,7 @@ class PRQ2SAMRecord[W <: Window](refPath : String) extends WindowFunction[(Int, 
     doJob(s, out)
   }
   // Init
-  var dati = new SomeData(refPath, roba.rapipar)
+  rapiStuff.init
+  var dati = new SomeData(refPath, rapipar)
   dati.init
 }

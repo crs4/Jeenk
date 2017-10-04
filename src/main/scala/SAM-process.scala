@@ -21,12 +21,11 @@ import bclconverter.reader.Reader.{Block, PRQData}
 
 class MyCRAMOutputFormat(s2c : SAM2CRAM, job : Job) extends HadoopOutputFormat[LongWritable, SAMRecordWritable](s2c, job) {
   private def writeObject(out : java.io.ObjectOutputStream) {
-    configuration.write(out)
+    super.write(out)
     out.writeObject(mapreduceOutputFormat)
   }
   private def readObject(in : java.io.ObjectInputStream){
-    configuration = new HConf
-    configuration.readFields(in)
+    super.read(in)
     mapreduceOutputFormat = in.readObject.asInstanceOf[SAM2CRAM]
   }
 }

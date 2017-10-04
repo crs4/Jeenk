@@ -123,35 +123,27 @@ object Writer {
   }
 }
 
-class miniWriter(pl : PList) extends Serializable {
+class miniWriter(pl : PList) {
   // initialize stream environment
-  val FP = StreamExecutionEnvironment.getExecutionEnvironment
-  FP.setParallelism(pl.flinkpar)
-  FP.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
-  FP.enableCheckpointing(10000)
-  FP.setStateBackend(new FsStateBackend(pl.stateBE, true))
+  var env = StreamExecutionEnvironment.getExecutionEnvironment
+  env.setParallelism(pl.flinkpar)
+  env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
+  env.enableCheckpointing(10000)
+  env.setStateBackend(new FsStateBackend(pl.stateBE, true))
   var jobs = List[(Int, String, String)]()
   var hofs = List[HadoopOutputFormat[LongWritable, SAMRecordWritable]]()
-  var s2c = new SAM2CRAM(pl.header, "file://" + pl.sref)
-  // functions
-  // private def writeObject(out : java.io.ObjectOutputStream) {
-  //   out.writeObject(s2c)
-  // }
-  // private def readObject(in : java.io.ObjectInputStream){
-  //   s2c = in.readObject.asInstanceOf[SAM2CRAM]
-  //   println(s"head: ${pl.header} -- ref: ${pl.sref}")
-  // }
-  def writeToOF(x : (DataStream[SAMRecordWritable], String)) : HadoopOutputFormat[LongWritable, SAMRecordWritable] = {
+  def writeToOF(x : (DataStream[SAMRecordWritable], String)) = {
+    val s2c = new SAM2CRAM(pl.header, "file://" + pl.sref)
     val opath = new HPath(x._2 + ".cram")
     val job = Job.getInstance(new HConf)
     MapreduceFileOutputFormat.setOutputPath(job, opath)
     val hof = new MyCRAMOutputFormat(s2c, job)
+    hofs ::= hof
     // val hof = new HadoopOutputFormat(new NullOutputFormat[LongWritable, SAMRecordWritable], job)
     // write to cram
     x._1
       .map(s => (new LongWritable(0), s))
       .writeUsingOutputFormat(hof)
-    return hof
   }
   def add(id : Int, topicname : String, filename : String) {
     jobs ::= (id, topicname, filename)
@@ -166,7 +158,7 @@ class miniWriter(pl : PList) extends Serializable {
     props.put("auto.commit.interval.ms", "10000")
     val cons = new FlinkKafkaConsumer010[(Int, PRQData)](topicname, new MyDeserializer, props)
       .assignTimestampsAndWatermarks(new MyWaterMarker[(Int, PRQData)])
-    val ds = FP
+    val ds = env
       .addSource(cons)
       .setParallelism(pl.kafkapar)
     val sam = ds
@@ -174,11 +166,11 @@ class miniWriter(pl : PList) extends Serializable {
       .timeWindow(Time.milliseconds(pl.rapiwin))
       .apply(new PRQ2SAMRecord[TimeWindow](pl.sref, pl.rapipar))
 
-    hofs ::= writeToOF(sam, filename)
+    writeToOF(sam, filename)
   }
   def go = {
     jobs.foreach(j => doJob(j._1, j._2, j._3))
-    FP.execute
+    env.execute
     finalizeAll
   }
 }
@@ -211,16 +203,14 @@ object runWriter {
     implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
     // implicit val timeout = Timeout(30 seconds)
 
-    val pl = new PList(param)
-    val rw = new Writer(pl)
-
     val rg = new scala.util.Random
     val cp = new ConsProps("conconsumer10.")
     cp.put("auto.offset.reset", "earliest")
     cp.put("enable.auto.commit", "true")
     cp.put("auto.commit.interval.ms", "1000")
     val conConsumer = new KafkaConsumer[Void, String](cp)
-
+    val pl = new PList(param)
+    val rw = new Writer(pl)
     conConsumer.subscribe(List(pl.kafkaControl))
     var jobs = List[Future[Any]]()
     while (true) {

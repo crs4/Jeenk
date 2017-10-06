@@ -20,6 +20,7 @@ libraryDependencies ++= Seq(
   "org.apache.flink" %% "flink-streaming-scala" % fver ,
   "org.apache.flink" %% "flink-hadoop-compatibility" % fver force(),
   "org.apache.flink" %% "flink-connector-kafka-0.10" % fver ,
+  "org.apache.flink" %% "flink-connector-filesystem" % fver ,
   "org.apache.flink" %% "flink-clients" % fver
 )
 

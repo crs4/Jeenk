@@ -1,47 +1,31 @@
 package bclconverter.aligner
 
 import com.typesafe.config.ConfigFactory
-import htsjdk.samtools.{SAMProgramRecord, SAMRecord, CigarOperator, Cigar, CigarElement, SAMFileHeader, SAMSequenceRecord}
+import htsjdk.samtools.{SAMProgramRecord, SAMRecord, CigarOperator, Cigar, CigarElement, SAMFileHeader, SAMSequenceRecord, CRAMContainerStreamWriter}
 import it.crs4.rapi.{Alignment, AlignOp, Contig, Read, Fragment, Batch, Ref, AlignerState, Rapi, RapiUtils, RapiConstants, Opts}
 import org.apache.flink.api.java.tuple.Tuple
-import org.apache.flink.api.scala.hadoop.mapreduce.HadoopOutputFormat
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.function.{WindowFunction, AllWindowFunction}
 import org.apache.flink.streaming.api.windowing.windows.{Window, GlobalWindow, TimeWindow}
 import org.apache.flink.util.Collector
 import org.apache.hadoop.conf.{Configuration => HConf}
-import org.apache.hadoop.fs.{Path => HPath}
+import org.apache.hadoop.fs.{FileSystem, Path => HPath}
 import org.apache.hadoop.io.{NullWritable, LongWritable}
-import org.apache.hadoop.mapreduce.{Job, RecordWriter, TaskAttemptContext}
-import org.seqdoop.hadoop_bam.SAMFormat
-import org.seqdoop.hadoop_bam.{AnySAMInputFormat, CRAMInputFormat, SAMRecordWritable, KeyIgnoringCRAMOutputFormat, KeyIgnoringCRAMRecordWriter, KeyIgnoringBAMOutputFormat, KeyIgnoringBAMRecordWriter, KeyIgnoringAnySAMOutputFormat}
+import org.apache.hadoop.mapreduce.{Job, JobID, RecordWriter, TaskAttemptContext, TaskAttemptID, OutputCommitter}
+import org.seqdoop.hadoop_bam.{SAMFormat, AnySAMInputFormat, CRAMInputFormat, SAMRecordWritable, KeyIgnoringCRAMOutputFormat, KeyIgnoringCRAMRecordWriter, KeyIgnoringBAMOutputFormat, KeyIgnoringBAMRecordWriter, KeyIgnoringAnySAMOutputFormat, CRAMRecordWriter}
 import scala.collection.JavaConversions._
+
+import org.seqdoop.hadoop_bam.util.SAMHeaderReader
+import org.apache.flink.streaming.connectors.fs.{Writer => FWriter, StreamWriterBase}
+import org.apache.flink.api.java.hadoop.mapreduce.utils.HadoopUtils
+import org.apache.flink.runtime.fs.hdfs.HadoopFileSystem
+import htsjdk.samtools.cram.ref.ReferenceSource
+import org.seqdoop.hadoop_bam.util.NIOFileUtil
 
 import bclconverter.reader.Reader.{Block, PRQData}
 
-class MyCRAMOutputFormat(s2c : SAM2CRAM, job : Job) extends HadoopOutputFormat[LongWritable, SAMRecordWritable](s2c, job) {
-  private def writeObject(out : java.io.ObjectOutputStream) {
-    super.write(out)
-    out.writeObject(mapreduceOutputFormat)
-  }
-  private def readObject(in : java.io.ObjectInputStream){
-    super.read(in)
-    mapreduceOutputFormat = in.readObject.asInstanceOf[SAM2CRAM]
-  }
-}
-
-
 // Writer from SAMRecordWritable to CRAM format
-class SAM2CRAM(var head : String, var ref : String) extends KeyIgnoringCRAMOutputFormat[LongWritable] with Serializable {
-  def this() = this(null, null)
-  var headpath : HPath = _
-  override def getRecordWriter(ctx : TaskAttemptContext, out : HPath) : RecordWriter[LongWritable, SAMRecordWritable] = {
-    val conf = ctx.getConfiguration
-    readSAMHeaderFrom(headpath, conf)
-    setWriteHeader(true)
-    conf.set(CRAMInputFormat.REFERENCE_SOURCE_PATH_PROPERTY, ref)
-    super.getRecordWriter(ctx, out)
-  }
+class CRAMWriter(var head : String, var ref : String) extends StreamWriterBase[(LongWritable, SAMRecordWritable)] {
   private def writeObject(out : java.io.ObjectOutputStream) {
     out.writeObject(head)
     out.writeObject(ref)
@@ -49,37 +33,34 @@ class SAM2CRAM(var head : String, var ref : String) extends KeyIgnoringCRAMOutpu
   private def readObject(in : java.io.ObjectInputStream){
     head = in.readObject.asInstanceOf[String]
     ref = in.readObject.asInstanceOf[String]
-    init
   }
-  def init {
-    if (head != null)
-      headpath = new HPath(head)
+  override
+  def duplicate() : FWriter[(LongWritable, SAMRecordWritable)] = {
+    new CRAMWriter(head, ref)
+  }
+  override
+  def write(record: (LongWritable, SAMRecordWritable)) {
+    val rec = record._2.get
+    cramContainerStream.writeAlignment(rec);
+  }
+  override
+  def open(fs : FileSystem, path : HPath) {
+    super.open(fs, path)
+    val conf = HadoopFileSystem.getHadoopConfiguration
+    val header = SAMHeaderReader.readSAMHeaderFrom(new HPath(head), conf)
+    refSource = new ReferenceSource(NIOFileUtil.asPath(ref))
+    cramContainerStream = new CRAMContainerStreamWriter(getStream, null, refSource, header, HADOOP_BAM_PART_ID)
+    cramContainerStream.writeHeader(header)
+  }
+  override
+  def close {
+    cramContainerStream.finish(false)
   }
   // start
-  init
+  val HADOOP_BAM_PART_ID = "Hadoop-BAM-Part"
+  var refSource : ReferenceSource = _
+  var cramContainerStream : CRAMContainerStreamWriter = _
 }
-
-/************************
-class SAM2BAM extends KeyIgnoringBAMOutputFormat[LongWritable] {
-  override def getRecordWriter(ctx : TaskAttemptContext, out : HPath) : RecordWriter[LongWritable, SAMRecordWritable] = {
-    val conf = ctx.getConfiguration
-    readSAMHeaderFrom(myheader, conf)
-    setWriteHeader(true)
-    super.getRecordWriter(ctx, out)
-  }
-  val myheader = new HPath(roba.header)
-}
-
-class SAM2SAM extends KeyIgnoringAnySAMOutputFormat[LongWritable](SAMFormat.valueOf("SAM")) {
-  override def getRecordWriter(ctx : TaskAttemptContext, out : HPath) : RecordWriter[LongWritable, SAMRecordWritable] = {
-    val conf = ctx.getConfiguration
-    readSAMHeaderFrom(myheader, conf)
-    setWriteHeader(true)
-    super.getRecordWriter(ctx, out)
-  }
-  val myheader = new HPath(roba.header)
-}
-******************************/
 
 class MyRef(var s : String) extends Ref with Serializable {
   private def writeObject(out : java.io.ObjectOutputStream) {

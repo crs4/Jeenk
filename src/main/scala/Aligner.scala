@@ -6,7 +6,6 @@ import java.util.Properties
 import java.util.concurrent.Executors
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.utils.ParameterTool
-import org.apache.flink.api.scala.hadoop.mapreduce.HadoopOutputFormat
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.runtime.state.filesystem.FsStateBackend
 import org.apache.flink.runtime.state.memory.MemoryStateBackend
@@ -23,11 +22,12 @@ import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
 import org.apache.hadoop.io.{NullWritable, LongWritable}
 import org.apache.hadoop.mapreduce.Job
-import org.apache.hadoop.mapreduce.lib.output.{FileOutputFormat => MapreduceFileOutputFormat, NullOutputFormat}
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.seqdoop.hadoop_bam.SAMRecordWritable
 import scala.collection.JavaConversions._
 import scala.concurrent.{ExecutionContext, Await, Future}
+
+import org.apache.flink.streaming.connectors.fs.bucketing.BucketingSink
 
 import bclconverter.reader.Reader.{Block, PRQData}
 
@@ -131,25 +131,15 @@ class miniWriter(pl : PList) {
   env.enableCheckpointing(10000)
   env.setStateBackend(new FsStateBackend(pl.stateBE, true))
   var jobs = List[(Int, String, String)]()
-  var hofs = List[HadoopOutputFormat[LongWritable, SAMRecordWritable]]()
   def writeToOF(x : (DataStream[SAMRecordWritable], String)) = {
-    val s2c = new SAM2CRAM(pl.header, "file://" + pl.sref)
-    val opath = new HPath(x._2 + ".cram")
-    val job = Job.getInstance(new HConf)
-    MapreduceFileOutputFormat.setOutputPath(job, opath)
-    val hof = new MyCRAMOutputFormat(s2c, job)
-    hofs ::= hof
-    // val hof = new HadoopOutputFormat(new NullOutputFormat[LongWritable, SAMRecordWritable], job)
-    // write to cram
+    val bucket = new BucketingSink[(LongWritable, SAMRecordWritable)](x._2 + ".cram")
+      .setWriter(new CRAMWriter(pl.header, "file://" + pl.sref))
     x._1
       .map(s => (new LongWritable(0), s))
-      .writeUsingOutputFormat(hof)
+      .addSink(bucket)
   }
   def add(id : Int, topicname : String, filename : String) {
     jobs ::= (id, topicname, filename)
-  }
-  def finalizeAll = {
-    hofs.foreach(hof => hof.finalizeGlobal(1))
   }
   def doJob(id : Int, topicname : String, filename : String) = {
     val props = new ConsProps("outconsumer10.")
@@ -171,7 +161,6 @@ class miniWriter(pl : PList) {
   def go = {
     jobs.foreach(j => doJob(j._1, j._2, j._3))
     env.execute
-    finalizeAll
   }
 }
 
@@ -207,7 +196,7 @@ object runWriter {
     val cp = new ConsProps("conconsumer10.")
     cp.put("auto.offset.reset", "earliest")
     cp.put("enable.auto.commit", "true")
-    cp.put("auto.commit.interval.ms", "1000")
+    cp.put("auto.commit.interval.ms", "10000")
     val conConsumer = new KafkaConsumer[Void, String](cp)
     val pl = new PList(param)
     val rw = new Writer(pl)

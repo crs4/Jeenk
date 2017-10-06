@@ -1,7 +1,7 @@
 package bclconverter.aligner
 
 import com.typesafe.config.ConfigFactory
-import htsjdk.samtools.{SAMProgramRecord, SAMRecord, CigarOperator, Cigar, CigarElement, SAMFileHeader, SAMSequenceRecord, CRAMContainerStreamWriter}
+import htsjdk.samtools.{SAMProgramRecord, SAMRecord, CigarOperator, Cigar, CigarElement, SAMFileHeader, SAMSequenceRecord, MyCRAMContainerStreamWriter}
 import it.crs4.rapi.{Alignment, AlignOp, Contig, Read, Fragment, Batch, Ref, AlignerState, Rapi, RapiUtils, RapiConstants, Opts}
 import org.apache.flink.api.java.tuple.Tuple
 import org.apache.flink.streaming.api.scala._
@@ -49,17 +49,18 @@ class CRAMWriter(var head : String, var ref : String) extends StreamWriterBase[(
     val conf = HadoopFileSystem.getHadoopConfiguration
     val header = SAMHeaderReader.readSAMHeaderFrom(new HPath(head), conf)
     refSource = new ReferenceSource(NIOFileUtil.asPath(ref))
-    cramContainerStream = new CRAMContainerStreamWriter(getStream, null, refSource, header, HADOOP_BAM_PART_ID)
+    cramContainerStream = new MyCRAMContainerStreamWriter(getStream, null, refSource, header, HADOOP_BAM_PART_ID)
     cramContainerStream.writeHeader(header)
   }
   override
   def close {
     cramContainerStream.finish(false)
+    super.close
   }
   // start
   val HADOOP_BAM_PART_ID = "Hadoop-BAM-Part"
   var refSource : ReferenceSource = _
-  var cramContainerStream : CRAMContainerStreamWriter = _
+  var cramContainerStream : MyCRAMContainerStreamWriter = _
 }
 
 class MyRef(var s : String) extends Ref with Serializable {

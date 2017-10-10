@@ -113,7 +113,7 @@ class RData extends Serializable{
   var bsize = 2048
   var mismatches = 1
   var undet = "Undetermined"
-  var jnum = 1
+  var rgrouping = 1
   var flinkpar = 1
   var kafkaTopic : String = "prq"
   var kafkaControl : String = "kcon"
@@ -125,7 +125,7 @@ class RData extends Serializable{
     bsize = param.getInt("bsize", bsize)
     mismatches = param.getInt("mismatches", mismatches)
     undet = param.get("undet", undet)
-    jnum = param.getInt("jnum", jnum)
+    rgrouping = param.getInt("rgrouping", rgrouping)
     flinkpar = param.getInt("readerflinkpar", flinkpar)
     kafkaTopic = param.get("kafkaTopic", kafkaTopic)
     kafkaControl = param.get("kafkaControl", kafkaControl)
@@ -307,8 +307,8 @@ object runReader {
     reader.sendTOC
 
     val w = reader.getAllJobs
-    val jnum = reader.rd.jnum
-    val tasks = w.grouped(jnum).map(x => Future{reader.BCLprocess(x)})
+    val rgrouping = reader.rd.rgrouping
+    val tasks = w.grouped(rgrouping).map(x => Future{reader.BCLprocess(x)})
     val aggregated = Future.sequence(tasks)
     Await.result(aggregated, Duration.Inf)
     reader.sendEOS

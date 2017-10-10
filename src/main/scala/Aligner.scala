@@ -137,7 +137,7 @@ class miniWriter(pl : PList) {
   def writeToOF(x : (DataStream[SAMRecordWritable], String)) = {
     val bucket = new BucketingSink[(LongWritable, SAMRecordWritable)](x._2 + ".cram")
       .setWriter(new CRAMWriter(pl.header, "file://" + pl.sref))
-      .setBatchSize(1024 * 1024 * 2)
+      .setBatchSize(1024 * 1024 * 8)
     x._1
       .map(s => (new LongWritable(0), s))
       .addSink(bucket)

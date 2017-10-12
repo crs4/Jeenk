@@ -157,8 +157,8 @@ class Reader() extends Serializable {
   var lanes = 0
   // processes tile and produces PRQ
   def BCLprocess(input : Seq[(Int, Int)]) = {
-    val FP = StreamExecutionEnvironment.getExecutionEnvironment
-    FP.setParallelism(rd.flinkpar)
+    val env = StreamExecutionEnvironment.getExecutionEnvironment
+    env.setParallelism(rd.flinkpar)
     def kafkize(x : (DataStream[PRQData], Int)) = {
       val ds = (x._1)
       val key = x._2
@@ -173,10 +173,12 @@ class Reader() extends Serializable {
     }
     def procReads(input : (Int, Int)) : Seq[(DataStream[PRQData], Int)] = {
       val (lane, tile) = input
-      println(s"Processing lane $lane tile $tile")
 
-      val in = FP.fromElements(input)
-      val bcl = in.flatMap(new PRQreadBCL(rd)).rebalance
+      val in = env.fromElements(input)
+      val bcl = in.flatMap(new PRQreadBCL(rd))
+        .name(s"Lane $lane tile $tile")
+        .rebalance
+      
       val stuff = bcl
         .split {
 	input : (Block, Block, Block, Block) =>
@@ -187,27 +189,30 @@ class Reader() extends Serializable {
       val output = filenames
         .filterKeys(_._1 == lane)
         .keys.map{ k =>
-	val ds = stuff.select(k._2).map(x => (x._2, x._3, x._4))
-	  .map(new toPRQ)
+          val tag = k._2
+	  val ds = stuff.select(tag).map(x => (x._2, x._3, x._4))
+	    .map(new toPRQ)
+            .name(s"${sampleMap((lane, tag))}")
 
-	val ho = filenames(k)
-	(ds, f2id(ho))
-      }.toSeq
+	  val ho = filenames(k)
+	  (ds, f2id(ho))
+        }.toSeq
       return output
     }
     // START
     val stuff = input
       .flatMap(procReads)
     stuff.foreach(kafkize)
-    FP.execute
+    env.execute("Process BCL files")
   }
   // send EOS to each kafka partition, for each topic
   def sendEOS = {
-    val FP = StreamExecutionEnvironment.getExecutionEnvironment
-    FP.setParallelism(1)
+    val env = StreamExecutionEnvironment.getExecutionEnvironment
+    env.setParallelism(1)
     val k : Block = Array(13)
     val eos : PRQData = (k, k, k, k, k)
-    val EOS : DataStream[PRQData] = FP.fromCollection(Array.fill(runReader.kafkapar)(eos))
+    val EOS : DataStream[PRQData] = env.fromCollection(Array.fill(runReader.kafkapar)(eos))
+    EOS.name("EOS")
     f2id.values.foreach{id =>
       FlinkKafkaProducer010.writeToKafkaWithTimestamps(
         EOS.javaStream,
@@ -217,7 +222,7 @@ class Reader() extends Serializable {
         new MyPartitioner(runReader.kafkapar)
       )
     }
-    FP.execute
+    env.execute("Send EOS's")
   }
   def setFilenames = {
     // Uncomment next lines if you want "Undetermined" reads in the output as well

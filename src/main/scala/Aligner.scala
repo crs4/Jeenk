@@ -135,12 +135,14 @@ class miniWriter(pl : PList) {
   env.setStateBackend(new FsStateBackend(pl.stateBE, true))
   var jobs = List[(Int, String, String)]()
   def writeToOF(x : (DataStream[SAMRecordWritable], String)) = {
-    val bucket = new BucketingSink[(LongWritable, SAMRecordWritable)](x._2 + ".cram")
+    val fname = x._2 + ".cram"
+    val bucket = new BucketingSink[(LongWritable, SAMRecordWritable)](fname)
       .setWriter(new CRAMWriter(pl.header, "file://" + pl.sref))
       .setBatchSize(1024 * 1024 * 8)
     x._1
       .map(s => (new LongWritable(0), s))
       .addSink(bucket)
+      .name(fname)
   }
   def add(id : Int, topicname : String, filename : String) {
     jobs ::= (id, topicname, filename)
@@ -154,6 +156,7 @@ class miniWriter(pl : PList) {
       .assignTimestampsAndWatermarks(new MyWaterMarker[(Int, PRQData)])
     val ds = env
       .addSource(cons)
+      .name(topicname)
       .setParallelism(pl.kafkapar)
     val sam = ds
       .keyBy(0)
@@ -164,7 +167,7 @@ class miniWriter(pl : PList) {
   }
   def go = {
     jobs.foreach(j => doJob(j._1, j._2, j._3))
-    env.execute
+    env.execute("Aligner")
   }
 }
 

@@ -161,7 +161,7 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
     val sam = ds
       .keyBy(0)
       .timeWindow(Time.milliseconds(pl.rapiwin))
-      .apply(new PRQ2SAMRecord[TimeWindow](pl.sref, pl.rapipar))
+      .apply(new PRQAligner[TimeWindow](pl.sref, pl.rapipar))
 
     writeToOF(sam, filename)
   }

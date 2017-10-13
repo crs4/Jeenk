@@ -136,7 +136,7 @@ class SomeData(var r : String, var rapipar : Int) extends Serializable {
 }
 
 
-class PRQ2SAMRecord[W <: Window](refPath : String, rapipar : Int) extends WindowFunction[(Int, PRQData), SAMRecordWritable, Tuple, W] {
+class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends WindowFunction[(Int, PRQData), SAMRecordWritable, Tuple, W] {
   def alignOpToCigarElement(alnOp : AlignOp) : CigarElement = {
     val cigarOp = (alnOp.getType) match {
       case AlignOp.Type.Match => CigarOperator.M

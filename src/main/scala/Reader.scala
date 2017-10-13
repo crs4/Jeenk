@@ -156,7 +156,7 @@ class Reader() extends Serializable {
   var f2id = Map[String, Int]()
   var lanes = 0
   // processes tile and produces PRQ
-  def BCLprocess(input : Seq[(Int, Int)]) = {
+  def BCLprocess(input : Seq[(Int, Int)], ind : (Int, Int)) = {
     val env = StreamExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(rd.flinkpar)
     def kafkize(x : (DataStream[PRQData], Int)) = {
@@ -203,7 +203,7 @@ class Reader() extends Serializable {
     val stuff = input
       .flatMap(procReads)
     stuff.foreach(kafkize)
-    env.execute("Process BCL files")
+    env.execute(s"Process BCL ${ind._1}/${ind._2}")
   }
   // send EOS to each kafka partition, for each topic
   def sendEOS = {
@@ -313,8 +313,10 @@ object runReader {
 
     val w = reader.getAllJobs
     val rgrouping = reader.rd.rgrouping
-    val tasks = w.grouped(rgrouping).map(x => Future{reader.BCLprocess(x)})
-    val aggregated = Future.sequence(tasks)
+    val tasks = w.grouped(rgrouping).toArray
+    val n = tasks.size
+    val jobs = tasks.indices.map(i => Future{reader.BCLprocess(tasks(i), (i+1, n))})
+    val aggregated = Future.sequence(jobs)
     Await.result(aggregated, Duration.Inf)
     reader.sendEOS
     Reader.conProducer.close

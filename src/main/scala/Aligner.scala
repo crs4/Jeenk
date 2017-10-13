@@ -123,7 +123,7 @@ object Writer {
   }
 }
 
-class miniWriter(pl : PList) {
+class miniWriter(pl : PList, ind : (Int, Int)) {
   // initialize stream environment
   var env = StreamExecutionEnvironment.getExecutionEnvironment
   env.setParallelism(pl.flinkpar)
@@ -167,7 +167,7 @@ class miniWriter(pl : PList) {
   }
   def go = {
     jobs.foreach(j => doJob(j._1, j._2, j._3))
-    env.execute("Aligner")
+    env.execute(s"Aligner ${ind._1}/${ind._2}")
   }
 }
 
@@ -176,8 +176,8 @@ class Writer(pl : PList) {
     val filenames = toc
       .map(s => s.split(" ", 2))
       .map(r => (r.head, r.last)).toMap
-    def RW(ids : Iterable[Int]) : miniWriter = {
-      val mw = new miniWriter(pl)
+    def RW(ids : Iterable[Int], ind : (Int, Int)) : miniWriter = {
+      val mw = new miniWriter(pl, ind)
       ids.foreach{
         id =>
         val topicname = pl.kafkaTopic + "-" + id.toString
@@ -187,7 +187,9 @@ class Writer(pl : PList) {
     }
     // start here
     val ids = filenames.keys.map(_.toInt)
-    ids.grouped(pl.wgrouping).map(lid => RW(lid)).toIterable
+    val g = ids.grouped(pl.wgrouping).toArray
+    val n = g.size
+    g.indices.map(i => RW(g(i), (i+1, n)))
   }
 }
 

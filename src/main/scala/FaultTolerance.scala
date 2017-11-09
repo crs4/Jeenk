@@ -76,9 +76,10 @@ class MyCPSource(len : Long) extends SourceFunction[(Int, String)] with ListChec
         // ctx.collect((rg.nextInt(16), rg.nextLong.toString))
         ctx.collect((rg.nextInt(16), s"$cow: ${rg.nextInt(10)}"))
         cow += 1
+        Thread.sleep(10)
       }
     }
-    ctx.collect((0, "EOS"))
+    // ctx.collect((0, "EOS"))
     Thread.sleep(10000)
   }
   def cancel() {
@@ -94,33 +95,15 @@ class MyCPSource(len : Long) extends SourceFunction[(Int, String)] with ListChec
   }
 }
 
-// plain source
-class MySource(len : Long) extends SourceFunction[(Int, String)] {
-  import MySource.rg
-  private var isRunning = true
-  private var cow = 0l
-
-  override def run(ctx: SourceFunction.SourceContext[(Int, String)]) {
-    while (isRunning && cow < len) {
-      // ctx.collect((rg.nextInt(16), rg.nextLong.toString))
-      ctx.collect((rg.nextInt(16), cow.toString))
-      cow += 1
-    }
-    ctx.collect((0, "EOS"))
-    Thread.sleep(10000)
-  }
-  def cancel() {
-    isRunning = false
-  }
-}
-
 
 object faultTest {
   def main(args: Array[String]) {
     // command line parameters
     val param = ParameterTool.fromArgs(args)
-    val size = param.getLong("len", 1024*1024)
-    val msec = 1000 * param.getLong("chk", 1)
+    val size = param.getLong("len", 10000)
+    val msec = 1000 * param.getLong("chk", 5)
+    val sbe = param.get("sbe", "file:///tmp/flink-state-backend")
+    val sname = param.get("sname", "file:///tmp/flink-out.txt")
 
     // setup flink environment
     var env = StreamExecutionEnvironment.getExecutionEnvironment
@@ -130,7 +113,7 @@ object faultTest {
     env.getCheckpointConfig.setMinPauseBetweenCheckpoints(msec/2)
     env.getCheckpointConfig.setCheckpointTimeout(msec/2)
     env.getCheckpointConfig.setMaxConcurrentCheckpoints(1)
-    env.setStateBackend(new FsStateBackend("hdfs:///tmp/flink-state-backend", true))
+    env.setStateBackend(new FsStateBackend(sbe, true))
 
     // generate data and write to disk
     val ds = env.addSource(new MyCPSource(size))
@@ -139,9 +122,11 @@ object faultTest {
       .keyBy(0)
       .timeWindow(Time.milliseconds(1024))
       .apply(new winTest[TimeWindow])
-    val bucket = new BucketingSink[String]("hdfs:///tmp/flink-out.txt")
+    val bucket = new BucketingSink[String](sname)
       .setBucketer(new DateTimeBucketer("yyyy"))
-      .setBatchSize(1024*1024)
+      .setBatchSize(1024)
+      .setInactiveBucketCheckInterval(1000)
+      .setInactiveBucketThreshold(1000)
     out
       .addSink(bucket)
       .name("Writing output")

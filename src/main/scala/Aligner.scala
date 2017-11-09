@@ -139,6 +139,8 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
     val bucket = new BucketingSink[(LongWritable, SAMRecordWritable)](fname)
       .setWriter(new CRAMWriter(pl.header, "file://" + pl.sref))
       .setBatchSize(1024 * 1024 * 8)
+      .setInactiveBucketCheckInterval(1000)
+      .setInactiveBucketThreshold(1000)
     x._1
       .map(s => (new LongWritable(0), s))
       .addSink(bucket)

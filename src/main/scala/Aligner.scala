@@ -77,7 +77,7 @@ object ConsProps {
   val rg = new scala.util.Random
 }
 
-class ConsProps(pref: String) extends Properties {
+class ConsProps(pref: String, kafkaServer : String) extends Properties {
   private val pkeys = Seq("bootstrap.servers", "group.id", "request.timeout.ms",
   "value.deserializer", "key.deserializer", "auto.offset.reset").map(pref + _)
   lazy val typesafeConfig = ConfigFactory.load()
@@ -88,6 +88,8 @@ class ConsProps(pref: String) extends Properties {
     }
   }
   put("client.id", "robo" + ConsProps.rg.nextLong.toString)
+  put("group.id", "robo" + ConsProps.rg.nextLong.toString)
+  put("bootstrap.servers", kafkaServer)
 
   def getCustomString(key: String) = typesafeConfig.getString(key)
   def getCustomInt(key: String) = typesafeConfig.getInt(key)
@@ -102,6 +104,7 @@ class PList(param : ParameterTool) extends Serializable{
   val kafkapar = param.getInt("kafkapar", 1)
   val rapipar = param.getInt("rapipar", 1)
   val wgrouping = param.getInt("wgrouping", 1)
+  val kafkaServer = param.get("kafkaServer", "127.0.0.1:9092")
   val kafkaTopic = param.get("kafkaTopic", "flink-prq")
   val kafkaControl = param.get("kafkaControl", "flink-con")
   val stateBE = param.getRequired("stateBE")
@@ -128,8 +131,8 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
   var env = StreamExecutionEnvironment.getExecutionEnvironment
   env.setParallelism(pl.flinkpar)
   env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
-  env.enableCheckpointing(10000)
-  env.getCheckpointConfig.setMinPauseBetweenCheckpoints(5000)
+  env.enableCheckpointing(60000)
+  env.getCheckpointConfig.setMinPauseBetweenCheckpoints(30000)
   env.getCheckpointConfig.setCheckpointTimeout(20000)
   env.getCheckpointConfig.setMaxConcurrentCheckpoints(1)
   env.setStateBackend(new FsStateBackend(pl.stateBE, true))
@@ -139,8 +142,8 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
     val bucket = new BucketingSink[(LongWritable, SAMRecordWritable)](fname)
       .setWriter(new CRAMWriter(pl.header, "file://" + pl.sref))
       .setBatchSize(1024 * 1024 * 8)
-      .setInactiveBucketCheckInterval(1000)
-      .setInactiveBucketThreshold(1000)
+      .setInactiveBucketCheckInterval(10000)
+      .setInactiveBucketThreshold(10000)
     x._1
       .map(s => (new LongWritable(0), s))
       .addSink(bucket)
@@ -150,7 +153,7 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
     jobs ::= (id, topicname, filename)
   }
   def doJob(id : Int, topicname : String, filename : String) = {
-    val props = new ConsProps("outconsumer10.")
+    val props = new ConsProps("outconsumer10.", pl.kafkaServer)
     props.put("auto.offset.reset", "earliest")
     props.put("enable.auto.commit", "true")
     props.put("auto.commit.interval.ms", "10000")
@@ -203,13 +206,13 @@ object runWriter {
     implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
     // implicit val timeout = Timeout(30 seconds)
 
+    val pl = new PList(param)
     val rg = new scala.util.Random
-    val cp = new ConsProps("conconsumer10.")
+    val cp = new ConsProps("conconsumer10.", pl.kafkaServer)
     cp.put("auto.offset.reset", "earliest")
     cp.put("enable.auto.commit", "true")
     cp.put("auto.commit.interval.ms", "10000")
     val conConsumer = new KafkaConsumer[Void, String](cp)
-    val pl = new PList(param)
     val rw = new Writer(pl)
     conConsumer.subscribe(List(pl.kafkaControl))
     var jobs = List[Future[Any]]()

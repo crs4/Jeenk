@@ -85,14 +85,30 @@ class MyOpts(var rapipar : Int) extends Opts with Serializable {
   def init {
     setShareRefMem(true)
     setNThreads(rapipar)
+    println(s"#### init $this $rapipar")
     Rapi.init(this)
   }
   init
 }
 
-object rapiStuff {
+// object rapiStuff {
+//   RapiUtils.loadPlugin
+//   def init {
+//     Reader.logger.error("rapiStuff.init")
+//   }
+// }
+
+object SomeData {
   RapiUtils.loadPlugin
-  def init {}
+  private var opts : MyOpts = null
+  def getOpts(rapipar : Int) : MyOpts = {
+    synchronized {
+      if (opts == null) {
+        opts = new MyOpts(rapipar)
+      }
+    }
+    opts
+  }
 }
 
 class SomeData(var r : String, var rapipar : Int) extends Serializable {
@@ -123,9 +139,8 @@ class SomeData(var r : String, var rapipar : Int) extends Serializable {
     init
   }
   def init = {
-    RapiUtils.loadPlugin
-    val opts = new MyOpts(rapipar)
-    aligner = new AlignerState(opts)
+    // val opts = new MyOpts(rapipar)
+    aligner = new AlignerState(SomeData.getOpts(rapipar))
     ref = new MyRef(r)
     header = createSamHeader(ref)
   }
@@ -238,7 +253,7 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends WindowFun
     doJob(s, out)
   }
   // Init
-  rapiStuff.init
-  var dati = new SomeData(refPath, rapipar)
+  // rapiStuff.init
+  val dati = new SomeData(refPath, rapipar)
   dati.init
 }

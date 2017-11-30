@@ -200,13 +200,16 @@ class Writer(pl : PList) {
 
 object runWriter {
   def main(args: Array[String]) {
-    val propertiesFile = "conf/bclconverter.properties"
-    val param = ParameterTool.fromPropertiesFile(propertiesFile)
-    val numTasks = param.getInt("numWriters") // concurrent flink tasks to be run
+    val pargs = ParameterTool.fromArgs(args)
+    val propertiesFile = pargs.getRequired("properties")
+    val pfile = ParameterTool.fromPropertiesFile(propertiesFile)
+    val params = pfile.mergeWith(pargs)
+
+    val numTasks = params.getInt("numWriters") // concurrent flink tasks to be run
     implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
     // implicit val timeout = Timeout(30 seconds)
 
-    val pl = new PList(param)
+    val pl = new PList(params)
     val rg = new scala.util.Random
     val cp = new ConsProps("conconsumer10.", pl.kafkaServer)
     cp.put("auto.offset.reset", "earliest")

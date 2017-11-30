@@ -108,6 +108,7 @@ class RData(param : ParameterTool) extends Serializable {
   var fuz : fuzzyIndex = null
   // parameters
   val root = param.getRequired("root")
+  val samplePath = param.get("sample-sheet", root + "SampleSheet.csv")
   val fout = param.getRequired("fout")
   val bdir = param.get("bdir", "Data/Intensities/BaseCalls/")
   val adapter = param.get("adapter", null)
@@ -242,7 +243,7 @@ class Reader(val param : ParameterTool) {
   }
   def readSampleNames = {
     // open SampleSheet.csv
-    val path = new HPath(rd.root + "SampleSheet.csv")
+    val path = new HPath(rd.samplePath)
     val fs = Reader.MyFS(path)
     val in = fs.open(path)
     val fsize = fs.getFileStatus(path).getLen
@@ -302,14 +303,17 @@ class Reader(val param : ParameterTool) {
 object runReader {
   var kafkapar = 1
   def main(args: Array[String]) {
-    val propertiesFile = "conf/bclconverter.properties"
-    val param = ParameterTool.fromPropertiesFile(propertiesFile)
-    val numTasks = param.getInt("numReaders") // concurrent flink tasks to be run
-    kafkapar = param.getInt("kafkapar", kafkapar)
+    val pargs = ParameterTool.fromArgs(args)
+    val propertiesFile = pargs.getRequired("properties")
+    val pfile = ParameterTool.fromPropertiesFile(propertiesFile)
+    val params = pfile.mergeWith(pargs)
+
+    val numTasks = params.getInt("numReaders") // concurrent flink tasks to be run
+    kafkapar = params.getInt("kafkapar", kafkapar)
     implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
     // implicit val timeout = Timeout(30 seconds)
 
-    val reader = new Reader(param)
+    val reader = new Reader(params)
     reader.readSampleNames
     reader.sendTOC
 

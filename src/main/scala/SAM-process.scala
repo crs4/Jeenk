@@ -1,26 +1,25 @@
 package bclconverter.aligner
 
 import com.typesafe.config.ConfigFactory
+import htsjdk.samtools.cram.ref.ReferenceSource
 import htsjdk.samtools.{SAMProgramRecord, SAMRecord, CigarOperator, Cigar, CigarElement, SAMFileHeader, SAMSequenceRecord, MyCRAMContainerStreamWriter}
 import it.crs4.rapi.{Alignment, AlignOp, Contig, Read, Fragment, Batch, Ref, AlignerState, Rapi, RapiUtils, RapiConstants, Opts}
+import org.apache.flink.api.java.hadoop.mapreduce.utils.HadoopUtils
 import org.apache.flink.api.java.tuple.Tuple
+import org.apache.flink.configuration.Configuration
+import org.apache.flink.runtime.fs.hdfs.HadoopFileSystem
 import org.apache.flink.streaming.api.scala._
-import org.apache.flink.streaming.api.scala.function.{WindowFunction, AllWindowFunction}
+import org.apache.flink.streaming.api.scala.function.{WindowFunction, AllWindowFunction, RichWindowFunction}
 import org.apache.flink.streaming.api.windowing.windows.{Window, GlobalWindow, TimeWindow}
+import org.apache.flink.streaming.connectors.fs.{Writer => FWriter, StreamWriterBase}
 import org.apache.flink.util.Collector
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, Path => HPath}
 import org.apache.hadoop.io.{NullWritable, LongWritable}
 import org.apache.hadoop.mapreduce.{Job, JobID, RecordWriter, TaskAttemptContext, TaskAttemptID, OutputCommitter}
+import org.seqdoop.hadoop_bam.util.{NIOFileUtil, SAMHeaderReader}
 import org.seqdoop.hadoop_bam.{SAMFormat, AnySAMInputFormat, CRAMInputFormat, SAMRecordWritable, KeyIgnoringCRAMOutputFormat, KeyIgnoringCRAMRecordWriter, KeyIgnoringBAMOutputFormat, KeyIgnoringBAMRecordWriter, KeyIgnoringAnySAMOutputFormat, CRAMRecordWriter}
 import scala.collection.JavaConversions._
-
-import org.seqdoop.hadoop_bam.util.SAMHeaderReader
-import org.apache.flink.streaming.connectors.fs.{Writer => FWriter, StreamWriterBase}
-import org.apache.flink.api.java.hadoop.mapreduce.utils.HadoopUtils
-import org.apache.flink.runtime.fs.hdfs.HadoopFileSystem
-import htsjdk.samtools.cram.ref.ReferenceSource
-import org.seqdoop.hadoop_bam.util.NIOFileUtil
 
 import bclconverter.reader.Reader.{Block, PRQData}
 
@@ -151,7 +150,7 @@ class SomeData(var r : String, var rapipar : Int) extends Serializable {
 }
 
 
-class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends WindowFunction[(Int, PRQData), SAMRecordWritable, Tuple, W] {
+class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindowFunction[(Int, PRQData), SAMRecordWritable, Tuple, W] {
   def alignOpToCigarElement(alnOp : AlignOp) : CigarElement = {
     val cigarOp = (alnOp.getType) match {
       case AlignOp.Type.Match => CigarOperator.M
@@ -252,8 +251,10 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends WindowFun
     val s = in.map(_._2)
     doJob(s, out)
   }
-  // Init
-  // rapiStuff.init
+  override def open(conf : Configuration) = {
+    // Init
+    dati.init
+  }
   val dati = new SomeData(refPath, rapipar)
-  dati.init
 }
+

@@ -9,7 +9,7 @@ import org.apache.flink.api.java.tuple.Tuple
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.runtime.fs.hdfs.HadoopFileSystem
 import org.apache.flink.streaming.api.scala._
-import org.apache.flink.streaming.api.scala.function.{WindowFunction, AllWindowFunction, RichWindowFunction}
+import org.apache.flink.streaming.api.scala.function.{WindowFunction, AllWindowFunction, RichWindowFunction, RichAllWindowFunction}
 import org.apache.flink.streaming.api.windowing.windows.{Window, GlobalWindow, TimeWindow}
 import org.apache.flink.streaming.connectors.fs.{Writer => FWriter, StreamWriterBase}
 import org.apache.flink.util.Collector
@@ -24,18 +24,16 @@ import scala.collection.JavaConversions._
 import bclconverter.reader.Reader.{Block, PRQData}
 
 // Writer from SAMRecordWritable to CRAM format
-class CRAMWriter(var head : String, var ref : String) extends StreamWriterBase[(LongWritable, SAMRecordWritable)] {
+class CRAMWriter(var ref : String) extends StreamWriterBase[(LongWritable, SAMRecordWritable)] {
   private def writeObject(out : java.io.ObjectOutputStream) {
-    out.writeObject(head)
     out.writeObject(ref)
   }
   private def readObject(in : java.io.ObjectInputStream){
-    head = in.readObject.asInstanceOf[String]
     ref = in.readObject.asInstanceOf[String]
   }
   override
   def duplicate() : FWriter[(LongWritable, SAMRecordWritable)] = {
-    new CRAMWriter(head, ref)
+    new CRAMWriter(ref)
   }
   override
   def write(record: (LongWritable, SAMRecordWritable)) {
@@ -46,7 +44,11 @@ class CRAMWriter(var head : String, var ref : String) extends StreamWriterBase[(
   def open(fs : FileSystem, path : HPath) {
     super.open(fs, path)
     val conf = HadoopFileSystem.getHadoopConfiguration
-    val header = SAMHeaderReader.readSAMHeaderFrom(new HPath(head), conf)
+    // val header = SAMHeaderReader.readSAMHeaderFrom(new HPath(head), conf)
+    val sd = new SomeData(ref, 1)
+    sd.init
+    val header : SAMFileHeader = SomeData.createSamHeader(sd.ref)
+    sd.close
     refSource = new ReferenceSource(NIOFileUtil.asPath(ref))
     cramContainerStream = new MyCRAMContainerStreamWriter(getStream, null, refSource, header, HADOOP_BAM_PART_ID)
     cramContainerStream.writeHeader(header)
@@ -90,12 +92,6 @@ class MyOpts(var rapipar : Int) extends Opts with Serializable {
   init
 }
 
-// object rapiStuff {
-//   RapiUtils.loadPlugin
-//   def init {
-//     Reader.logger.error("rapiStuff.init")
-//   }
-// }
 
 object SomeData {
   RapiUtils.loadPlugin
@@ -108,9 +104,6 @@ object SomeData {
     }
     opts
   }
-}
-
-class SomeData(var r : String, var rapipar : Int) extends Serializable {
   def createSamHeader(rapiRef : Ref) : SAMFileHeader = {
     def convertContig(rapiContig : Contig) : SAMSequenceRecord = {
       val sr = new SAMSequenceRecord(rapiContig.getName, rapiContig.getLen.toInt)
@@ -128,6 +121,9 @@ class SomeData(var r : String, var rapipar : Int) extends Serializable {
     newHeader.addProgramRecord(new SAMProgramRecord("Myname ver x.y.z with " + rapiVerStr))
     newHeader
   }
+}
+
+class SomeData(var r : String, var rapipar : Int) extends Serializable {
   private def writeObject(out : java.io.ObjectOutputStream) {
     out.writeObject(r)
     out.writeInt(rapipar)
@@ -141,7 +137,10 @@ class SomeData(var r : String, var rapipar : Int) extends Serializable {
     // val opts = new MyOpts(rapipar)
     aligner = new AlignerState(SomeData.getOpts(rapipar))
     ref = new MyRef(r)
-    header = createSamHeader(ref)
+    header = SomeData.createSamHeader(ref)
+  }
+  def close = {
+    ref.unload
   }
   // start here
   var ref : MyRef = _
@@ -251,9 +250,15 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindo
     val s = in.map(_._2)
     doJob(s, out)
   }
-  override def open(conf : Configuration) = {
+  override
+  def open(conf : Configuration) = {
     // Init
     dati.init
+  }
+  override
+  def close = {
+    // force munmapping of reference
+    dati.close
   }
   val dati = new SomeData(refPath, rapipar)
 }

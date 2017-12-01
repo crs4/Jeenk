@@ -109,7 +109,6 @@ class PList(param : ParameterTool) extends Serializable{
   val kafkaControl = param.get("kafkaControl", "flink-con")
   val stateBE = param.getRequired("stateBE")
   val sref = param.getRequired("reference")
-  val header = param.getRequired("header")
 }
 
 object Writer {
@@ -140,7 +139,7 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
   def writeToOF(x : (DataStream[SAMRecordWritable], String)) = {
     val fname = x._2 + ".cram"
     val bucket = new BucketingSink[(LongWritable, SAMRecordWritable)](fname)
-      .setWriter(new CRAMWriter(pl.header, "file://" + pl.sref))
+      .setWriter(new CRAMWriter(pl.sref))
       .setBatchSize(1024 * 1024 * 8)
       .setInactiveBucketCheckInterval(10000)
       .setInactiveBucketThreshold(10000)

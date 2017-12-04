@@ -83,7 +83,7 @@ class MyOpts(var rapipar : Int) extends Opts with Serializable {
     rapipar = in.readInt
     init
   }
-  def init {
+  def init =  synchronized {
     setShareRefMem(true)
     setNThreads(rapipar)
     println(s"#### init $this $rapipar")
@@ -94,7 +94,9 @@ class MyOpts(var rapipar : Int) extends Opts with Serializable {
 
 
 object SomeData {
-  RapiUtils.loadPlugin
+  synchronized {
+    RapiUtils.loadPlugin
+  }
   private var opts : MyOpts = null
   def getOpts(rapipar : Int) : MyOpts = {
     synchronized {
@@ -117,8 +119,10 @@ object SomeData {
     }
     def rapiVerStr = s"Rapi plugin - aligner: ${Rapi.getAlignerName}; aligner version: ${Rapi.getAlignerVersion}; plugin version: ${Rapi.getPluginVersion}"
     val newHeader = new SAMFileHeader()
-    rapiRef.foreach(contig => newHeader.addSequence(convertContig(contig)))
-    newHeader.addProgramRecord(new SAMProgramRecord("Myname ver x.y.z with " + rapiVerStr))
+    synchronized {
+      rapiRef.foreach(contig => newHeader.addSequence(convertContig(contig)))
+      newHeader.addProgramRecord(new SAMProgramRecord("Myname ver x.y.z with " + rapiVerStr))
+    }
     newHeader
   }
 }
@@ -133,13 +137,12 @@ class SomeData(var r : String, var rapipar : Int) extends Serializable {
     rapipar = in.readInt
     init
   }
-  def init = {
-    // val opts = new MyOpts(rapipar)
+  def init = synchronized {
     aligner = new AlignerState(SomeData.getOpts(rapipar))
     ref = new MyRef(r)
     header = SomeData.createSamHeader(ref)
   }
-  def close = {
+  def close = synchronized {
     ref.unload
   }
   // start here
@@ -173,7 +176,7 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindo
 
     List(toRec(r, 1, m), toRec(m, 2, r))
   }
-  def toRec(read : Read, readNum : Int, mate : Read) : SAMRecordWritable = {
+  def toRec(read : Read, readNum : Int, mate : Read) : SAMRecordWritable = synchronized {
     if (readNum < 1 || readNum > 2)
       throw new IllegalArgumentException(s"readNum $readNum is out of bounds -- only 1 and 2 are supported")
 
@@ -230,19 +233,23 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindo
   }
   def doJob(in : Iterable[PRQData], out : Collector[SAMRecordWritable]) = {
     // insert PRQ data
-    val reads = new Batch(2)
+    var reads : Batch = null
     val chr = java.nio.charset.Charset.forName("US-ASCII")
-    reads.reserve(in.size << 1)
+    synchronized {
+      reads = new Batch(2)
+      reads.reserve(in.size << 1)
+    }
     in.foreach{ x =>
       val (h, b1, q1, b2, q2) = x
-      reads.append(new String(h, chr), new String(b1, chr), new String(q1, chr), RapiConstants.QENC_SANGER)
-      reads.append(new String(h, chr), new String(b2, chr), new String(q2, chr), RapiConstants.QENC_SANGER)
+      synchronized {
+        reads.append(new String(h, chr), new String(b1, chr), new String(q1, chr), RapiConstants.QENC_SANGER)
+        reads.append(new String(h, chr), new String(b2, chr), new String(q2, chr), RapiConstants.QENC_SANGER)
+      }
     }
     // align and get SAMRecord's
     val mapal = dati.aligner
-    mapal.alignReads(dati.ref, reads)
+    synchronized { mapal.alignReads(dati.ref, reads) }
     val sams = reads.flatMap(p => toRec2(p))
-    println(s"#### reads:${reads.size}")
     sams.foreach(x => out.collect(x))
   }
   def apply(key : Tuple, w : W, in : Iterable[(Int, PRQData)], out : Collector[SAMRecordWritable]) = {

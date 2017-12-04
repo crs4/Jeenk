@@ -46,7 +46,7 @@ class MyWaterMarker[T] extends AssignerWithPeriodicWatermarks[T] {
 class MyDeserializer extends DeserializationSchema[(Int, PRQData)] {
   var eos = false
   var key = 0
-  val keyspace = 64
+  val keyspace = 1024
   override def getProducedType = TypeInformation.of(classOf[(Int, PRQData)])
   override def isEndOfStream(el : (Int, PRQData)) : Boolean = {
     if (el._2._1.size > 1)
@@ -130,11 +130,11 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
   var env = StreamExecutionEnvironment.getExecutionEnvironment
   env.setParallelism(pl.flinkpar)
   env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
-  env.enableCheckpointing(60000)
-  env.getCheckpointConfig.setMinPauseBetweenCheckpoints(30000)
-  env.getCheckpointConfig.setCheckpointTimeout(20000)
-  env.getCheckpointConfig.setMaxConcurrentCheckpoints(1)
-  env.setStateBackend(new FsStateBackend(pl.stateBE, true))
+  // env.enableCheckpointing(60000)
+  // env.getCheckpointConfig.setMinPauseBetweenCheckpoints(30000)
+  // env.getCheckpointConfig.setCheckpointTimeout(20000)
+  // env.getCheckpointConfig.setMaxConcurrentCheckpoints(1)
+  // env.setStateBackend(new FsStateBackend(pl.stateBE, true))
   var jobs = List[(Int, String, String)]()
   def writeToOF(x : (DataStream[SAMRecordWritable], String)) = {
     val fname = x._2 + ".cram"

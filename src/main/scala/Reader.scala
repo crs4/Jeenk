@@ -154,8 +154,8 @@ class miniReader(var rd : RData, var filenames : Map[(Int, String), String], var
     f2id = in.readObject.asInstanceOf[Map[String, Int]]
   }
   def kafkize(x : (DataStream[PRQData], Int)) = {
-    val ds = (x._1)
-      val key = x._2
+    val ds = x._1
+    val key = x._2
     val name = rd.kafkaTopic + "-" + key.toString
     FlinkKafkaProducer010.writeToKafkaWithTimestamps(
       ds.javaStream,

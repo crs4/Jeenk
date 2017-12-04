@@ -46,7 +46,6 @@ class MyWaterMarker[T] extends AssignerWithPeriodicWatermarks[T] {
 class MyDeserializer extends DeserializationSchema[(Int, PRQData)] {
   var eos = false
   var key = 0
-  val keyspace = 1024
   override def getProducedType = TypeInformation.of(classOf[(Int, PRQData)])
   override def isEndOfStream(el : (Int, PRQData)) : Boolean = {
     if (el._2._1.size > 1)
@@ -56,7 +55,7 @@ class MyDeserializer extends DeserializationSchema[(Int, PRQData)] {
   }
   override def deserialize(data : Array[Byte]) : (Int, PRQData) = {
     val rkey = key
-    key = (key + 1) % keyspace
+    key += 1
     val (s1, r1) = data.splitAt(4)
     val (p1, d1) = r1.splitAt(toInt(s1))
     val (s2, r2) = d1.splitAt(4)

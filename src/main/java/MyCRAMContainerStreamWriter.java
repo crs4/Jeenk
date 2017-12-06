@@ -1,4 +1,4 @@
-/* Version 2.9.1
+/* Version 2.13.1
    commented out outputStream.close() from finish method
    because it shouldn't be here, since outputStream.open()
    is not here as well
@@ -24,6 +24,7 @@ import htsjdk.samtools.cram.structure.CramCompressionRecord;
 import htsjdk.samtools.cram.structure.Slice;
 import htsjdk.samtools.util.Log;
 import htsjdk.samtools.util.RuntimeIOException;
+import htsjdk.samtools.util.SequenceUtil;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -444,7 +445,13 @@ public class MyCRAMContainerStreamWriter {
                     final SAMRecord restoredSamRecord = f.create(cramRecords.get(i));
                     assert (restoredSamRecord.getAlignmentStart() == samRecords.get(i).getAlignmentStart());
                     assert (restoredSamRecord.getReferenceName().equals(samRecords.get(i).getReferenceName()));
-                    assert (restoredSamRecord.getReadString().equals(samRecords.get(i).getReadString()));
+
+                    if (!restoredSamRecord.getReadString().equals(samRecords.get(i).getReadString())) {
+                        // try to fix the original read bases by normalizing them to BAM set:
+                        final byte[] originalReadBases = samRecords.get(i).getReadString().getBytes();
+                        final String originalReadBasesUpperCaseIupacNoDot = new String(SequenceUtil.toBamReadBasesInPlace(originalReadBases));
+                        assert (restoredSamRecord.getReadString().equals(originalReadBasesUpperCaseIupacNoDot));
+                    }
                     assert (restoredSamRecord.getBaseQualityString().equals(samRecords.get(i).getBaseQualityString()));
                 }
             }

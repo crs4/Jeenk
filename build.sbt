@@ -16,6 +16,7 @@ libraryDependencies ++= Seq(
   "com.google.guava" % "guava" % "19.0" ,
   "org.seqdoop" % "hadoop-bam" % "7.8.0" ,
   // "org.apache.hadoop"  % "hadoop-common" % "2.7.3" ,
+  "com.github.samtools" % "htsjdk" % "2.13.1" ,
   "org.apache.parquet" % "parquet-avro" % "1.8.1" ,
   "org.apache.flink" %% "flink-streaming-scala" % fver ,
   "org.apache.flink" %% "flink-hadoop-compatibility" % fver force(),

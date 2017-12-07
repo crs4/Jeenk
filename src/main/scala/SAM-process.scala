@@ -62,8 +62,8 @@ class MySAMRecordWritable extends Writable {
 }
 
 
-// Writer from SAMRecordWritable to CRAM format
-class CRAMWriter(var ref : String) extends StreamWriterBase[(LongWritable, SAMRecordWritable)] {
+// Writer from SAMRecord to CRAM format
+class CRAMWriter(var ref : String) extends StreamWriterBase[(LongWritable, SAMRecord)] {
   // Serialization
   private def writeObject(out : java.io.ObjectOutputStream) = {
     out.writeObject(ref)
@@ -76,10 +76,10 @@ class CRAMWriter(var ref : String) extends StreamWriterBase[(LongWritable, SAMRe
     new CRAMWriter(ref)
   }
   override
-  def write(record: (LongWritable, SAMRecordWritable)) = {
-    val myr = record._2
+  def write(record: (LongWritable, SAMRecord)) = {
+    val rec = record._2
     // myr.reset(header)
-    val rec = myr.get
+    // val rec = myr.get
     cramContainerStream.writeAlignment(rec)
   }
   def createHeader = {
@@ -198,7 +198,7 @@ class SomeData(var r : String, var rapipar : Int) extends Serializable {
 }
 
 
-class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindowFunction[(Int, PRQData), SAMRecordWritable, Tuple, W] {
+class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindowFunction[(Int, PRQData), SAMRecord, Tuple, W] {
   def alignOpToCigarElement(alnOp : AlignOp) : CigarElement = {
     val cigarOp = (alnOp.getType) match {
       case AlignOp.Type.Match => CigarOperator.M
@@ -215,14 +215,14 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindo
   def cigarRapiToHts(cigars : Seq[AlignOp]) : Cigar = {
     new Cigar(cigars.map(alignOpToCigarElement))
   }
-  def toRec2(in : Iterable[Read]) : Iterable[SAMRecordWritable] = {
+  def toRec2(in : Iterable[Read]) : Iterable[SAMRecord] = {
     val in2 = in.toArray
     val r = in2.head
     val m = in2.last
 
     List(toRec(r, 1, m), toRec(m, 2, r))
   }
-  def toRec(read : Read, readNum : Int, mate : Read) : SAMRecordWritable = synchronized {
+  def toRec(read : Read, readNum : Int, mate : Read) : SAMRecord = synchronized {
     if (readNum < 1 || readNum > 2)
       throw new IllegalArgumentException(s"readNum $readNum is out of bounds -- only 1 and 2 are supported")
 
@@ -273,11 +273,12 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindo
     else {
       out.setReadUnmappedFlag(true)
     }
-    val r = new SAMRecordWritable
-    r.set(out)
-    r
+    // val r = new SAMRecordWritable
+    // r.set(out)
+    // r
+    out
   }
-  def doJob(in : Iterable[PRQData], out : Collector[SAMRecordWritable]) = {
+  def doJob(in : Iterable[PRQData], out : Collector[SAMRecord]) = {
     // insert PRQ data
     var reads : Batch = null
     val chr = java.nio.charset.Charset.forName("US-ASCII")
@@ -298,7 +299,7 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindo
     val sams = reads.flatMap(p => toRec2(p))
     sams.foreach(x => out.collect(x))
   }
-  def apply(key : Tuple, w : W, in : Iterable[(Int, PRQData)], out : Collector[SAMRecordWritable]) = {
+  def apply(key : Tuple, w : W, in : Iterable[(Int, PRQData)], out : Collector[SAMRecord]) = {
     // insert PRQ data
     val s = in.map(_._2)
     doJob(s, out)

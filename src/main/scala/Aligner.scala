@@ -23,7 +23,8 @@ import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, 
 import org.apache.hadoop.io.{NullWritable, LongWritable}
 import org.apache.hadoop.mapreduce.Job
 import org.apache.kafka.clients.consumer.KafkaConsumer
-import org.seqdoop.hadoop_bam.SAMRecordWritable
+// import org.seqdoop.hadoop_bam.SAMRecordWritable
+import htsjdk.samtools.SAMRecord
 import scala.collection.JavaConversions._
 import scala.concurrent.{ExecutionContext, Await, Future}
 
@@ -135,10 +136,10 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
   // env.getCheckpointConfig.setMaxConcurrentCheckpoints(1)
   // env.setStateBackend(new FsStateBackend(pl.stateBE, true))
   var jobs = List[(Int, String, String)]()
-  def writeToOF(x : (DataStream[SAMRecordWritable], String)) = {
+  def writeToOF(x : (DataStream[SAMRecord], String)) = {
     val wr = new CRAMWriter(pl.sref)
     val fname = x._2 + ".cram"
-    val bucket = new BucketingSink[(LongWritable, SAMRecordWritable)](fname)
+    val bucket = new BucketingSink[(LongWritable, SAMRecord)](fname)
       .setWriter(wr)
       .setBatchSize(1024 * 1024 * 8)
       .setInactiveBucketCheckInterval(10000)

@@ -1,9 +1,12 @@
 package bclconverter.aligner
 
+import bclconverter.reader.Reader.{Block, PRQData}
 import com.typesafe.config.ConfigFactory
 import htsjdk.samtools.cram.ref.ReferenceSource
 import htsjdk.samtools.{SAMProgramRecord, SAMRecord, CigarOperator, Cigar, CigarElement, SAMFileHeader, SAMSequenceRecord, MyCRAMContainerStreamWriter}
+import htsjdk.samtools.{SAMRecord, BAMRecordCodec}
 import it.crs4.rapi.{Alignment, AlignOp, Contig, Read, Fragment, Batch, Ref, AlignerState, Rapi, RapiUtils, RapiConstants, Opts}
+import java.io.{DataOutput, DataInput}
 import org.apache.flink.api.java.hadoop.mapreduce.utils.HadoopUtils
 import org.apache.flink.api.java.tuple.Tuple
 import org.apache.flink.configuration.Configuration
@@ -15,53 +18,98 @@ import org.apache.flink.streaming.connectors.fs.{Writer => FWriter, StreamWriter
 import org.apache.flink.util.Collector
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, Path => HPath}
+import org.apache.hadoop.io.Writable
 import org.apache.hadoop.io.{NullWritable, LongWritable}
 import org.apache.hadoop.mapreduce.{Job, JobID, RecordWriter, TaskAttemptContext, TaskAttemptID, OutputCommitter}
+import org.seqdoop.hadoop_bam.util.{DataInputWrapper, DataOutputWrapper}
 import org.seqdoop.hadoop_bam.util.{NIOFileUtil, SAMHeaderReader}
-import org.seqdoop.hadoop_bam.{SAMFormat, AnySAMInputFormat, CRAMInputFormat, SAMRecordWritable, KeyIgnoringCRAMOutputFormat, KeyIgnoringCRAMRecordWriter, KeyIgnoringBAMOutputFormat, KeyIgnoringBAMRecordWriter, KeyIgnoringAnySAMOutputFormat, CRAMRecordWriter}
+import org.seqdoop.hadoop_bam.{SAMFormat, AnySAMInputFormat, SAMRecordWritable, CRAMInputFormat, KeyIgnoringCRAMOutputFormat, KeyIgnoringCRAMRecordWriter, KeyIgnoringBAMOutputFormat, KeyIgnoringBAMRecordWriter, KeyIgnoringAnySAMOutputFormat, CRAMRecordWriter, LazyBAMRecordFactory}
+import org.slf4j.LoggerFactory
 import scala.collection.JavaConversions._
 
-import bclconverter.reader.Reader.{Block, PRQData}
+
+object MySAMRecordWritable {
+  val lazyCodec = new BAMRecordCodec(null, new LazyBAMRecordFactory)
+}
+
+class MySAMRecordWritable extends Writable {
+  private var record : SAMRecord = _
+  def get = record
+  def set(r : SAMRecord) = {
+    record = r
+  }
+  override
+  def write(out : DataOutput) =  {
+    val codec = new BAMRecordCodec(record.getHeader)
+    codec.setOutputStream(new DataOutputWrapper(out))
+    codec.encode(record)
+  }
+  override
+  def readFields(in : DataInput) = {
+    MySAMRecordWritable.lazyCodec.setInputStream(new DataInputWrapper(in))
+    record = MySAMRecordWritable.lazyCodec.decode
+  }
+  def reset(head : SAMFileHeader) {
+    val pin = new java.io.PipedInputStream
+    val pout = new java.io.PipedOutputStream(pin)
+    val codecw = new BAMRecordCodec(head)
+    codecw.setOutputStream(pout)
+    codecw.encode(record)
+    val codecr = new BAMRecordCodec(head)
+    codecr.setInputStream(pin)
+    record = codecr.decode
+  }
+}
+
 
 // Writer from SAMRecordWritable to CRAM format
 class CRAMWriter(var ref : String) extends StreamWriterBase[(LongWritable, SAMRecordWritable)] {
-  private def writeObject(out : java.io.ObjectOutputStream) {
+  // Serialization
+  private def writeObject(out : java.io.ObjectOutputStream) = {
     out.writeObject(ref)
   }
-  private def readObject(in : java.io.ObjectInputStream){
+  private def readObject(in : java.io.ObjectInputStream) = {
     ref = in.readObject.asInstanceOf[String]
   }
   override
-  def duplicate() : FWriter[(LongWritable, SAMRecordWritable)] = {
+  def duplicate() : CRAMWriter = {
     new CRAMWriter(ref)
   }
   override
-  def write(record: (LongWritable, SAMRecordWritable)) {
-    val rec = record._2.get
-    cramContainerStream.writeAlignment(rec);
+  def write(record: (LongWritable, SAMRecordWritable)) = {
+    val myr = record._2
+    // myr.reset(header)
+    val rec = myr.get
+    cramContainerStream.writeAlignment(rec)
   }
-  override
-  def open(fs : FileSystem, path : HPath) {
-    super.open(fs, path)
+  def createHeader = {
     val conf = HadoopFileSystem.getHadoopConfiguration
-    // val header = SAMHeaderReader.readSAMHeaderFrom(new HPath(head), conf)
     val sd = new SomeData(ref, 1)
     sd.init
-    val header : SAMFileHeader = SomeData.createSamHeader(sd.ref)
+    header = SomeData.createSamHeader(sd.ref)
     sd.close
     refSource = new ReferenceSource(NIOFileUtil.asPath(ref))
+  }
+  override
+  def open(fs : FileSystem, path : HPath) = {
+    if (header == null || refSource == null)
+      createHeader
+    super.open(fs, path)
     cramContainerStream = new MyCRAMContainerStreamWriter(getStream, null, refSource, header, HADOOP_BAM_PART_ID)
     cramContainerStream.writeHeader(header)
   }
   override
-  def close {
+  def close = {
     cramContainerStream.finish(false)
+    cramContainerStream = null
+    refSource = null
     super.close
   }
   // start
   val HADOOP_BAM_PART_ID = "Hadoop-BAM-Part"
-  var refSource : ReferenceSource = _
-  var cramContainerStream : MyCRAMContainerStreamWriter = _
+  var refSource : ReferenceSource = null
+  var header : SAMFileHeader = null
+  var cramContainerStream : MyCRAMContainerStreamWriter = null
 }
 
 class MyRef(var s : String) extends Ref with Serializable {
@@ -86,12 +134,10 @@ class MyOpts(var rapipar : Int) extends Opts with Serializable {
   def init =  synchronized {
     setShareRefMem(true)
     setNThreads(rapipar)
-    println(s"#### init $this $rapipar")
     Rapi.init(this)
   }
   init
 }
-
 
 object SomeData {
   synchronized {

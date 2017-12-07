@@ -1,7 +1,6 @@
-/* Version 2.13.1
-   commented out outputStream.close() from finish method
-   because it shouldn't be here, since outputStream.open()
-   is not here as well
+/* Adapted from version 2.13.1: Commented out outputStream.close()
+   from finish method because it shouldn't be here, since
+   outputStream.open() is not here as well
 */
 
 

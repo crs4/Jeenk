@@ -136,9 +136,10 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
   // env.setStateBackend(new FsStateBackend(pl.stateBE, true))
   var jobs = List[(Int, String, String)]()
   def writeToOF(x : (DataStream[SAMRecordWritable], String)) = {
+    val wr = new CRAMWriter(pl.sref)
     val fname = x._2 + ".cram"
     val bucket = new BucketingSink[(LongWritable, SAMRecordWritable)](fname)
-      .setWriter(new CRAMWriter(pl.sref))
+      .setWriter(wr)
       .setBatchSize(1024 * 1024 * 8)
       .setInactiveBucketCheckInterval(10000)
       .setInactiveBucketThreshold(10000)
@@ -188,7 +189,6 @@ class Writer(pl : PList) {
       }
       mw
     }
-    // start here
     val ids = filenames.keys.map(_.toInt)
     val g = ids.grouped(pl.wgrouping).toArray
     val n = g.size

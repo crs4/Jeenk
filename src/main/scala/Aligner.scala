@@ -165,7 +165,7 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
       .setParallelism(pl.kafkapar)
     val sam = ds
       .keyBy(0)
-      .timeWindow(Time.milliseconds(pl.rapiwin))
+      .timeWindow(Time.milliseconds(pl.flinkpar * pl.rapiwin * 2 / 3))
       //.countWindow(pl.rapiwin)
       .apply(new PRQAligner[TimeWindow](pl.sref, pl.rapipar))
 

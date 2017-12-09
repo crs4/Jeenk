@@ -63,7 +63,7 @@ class MySAMRecordWritable extends Writable {
 
 
 // Writer from SAMRecord to CRAM format
-class CRAMWriter(var ref : String) extends StreamWriterBase[(LongWritable, SAMRecord)] {
+class CRAMWriter(var ref : String) extends StreamWriterBase[SAMRecord] {
   // Serialization
   private def writeObject(out : java.io.ObjectOutputStream) = {
     out.writeObject(ref)
@@ -76,10 +76,9 @@ class CRAMWriter(var ref : String) extends StreamWriterBase[(LongWritable, SAMRe
     new CRAMWriter(ref)
   }
   override
-  def write(record: (LongWritable, SAMRecord)) = {
-    val rec = record._2
-    // myr.reset(header)
-    // val rec = myr.get
+  def write(rec : SAMRecord) = {
+    // add back header
+    rec.setHeader(header)
     cramContainerStream.writeAlignment(rec)
   }
   def createHeader = {
@@ -273,9 +272,8 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindo
     else {
       out.setReadUnmappedFlag(true)
     }
-    // val r = new SAMRecordWritable
-    // r.set(out)
-    // r
+    // remove header, it will be adde back later
+    out.setHeader(null)
     out
   }
   def doJob(in : Iterable[PRQData], out : Collector[SAMRecord]) = {

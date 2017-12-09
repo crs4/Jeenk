@@ -26,6 +26,7 @@ import org.seqdoop.hadoop_bam.util.{NIOFileUtil, SAMHeaderReader}
 import org.seqdoop.hadoop_bam.{SAMFormat, AnySAMInputFormat, SAMRecordWritable, CRAMInputFormat, KeyIgnoringCRAMOutputFormat, KeyIgnoringCRAMRecordWriter, KeyIgnoringBAMOutputFormat, KeyIgnoringBAMRecordWriter, KeyIgnoringAnySAMOutputFormat, CRAMRecordWriter, LazyBAMRecordFactory}
 import org.slf4j.LoggerFactory
 import scala.collection.JavaConversions._
+import scala.collection.mutable
 
 
 object MySAMRecordWritable {
@@ -83,10 +84,7 @@ class CRAMWriter(var ref : String) extends StreamWriterBase[SAMRecord] {
   }
   def createHeader = {
     val conf = HadoopFileSystem.getHadoopConfiguration
-    val sd = new SomeData(ref, 1)
-    sd.init
-    header = SomeData.createSamHeader(sd.ref)
-    sd.close
+    header = RapiAligner.getHeader(ref)
     refSource = new ReferenceSource(NIOFileUtil.asPath(ref))
   }
   override
@@ -138,7 +136,7 @@ class MyOpts(var rapipar : Int) extends Opts with Serializable {
   init
 }
 
-object SomeData {
+object RapiAligner {
   synchronized {
     RapiUtils.loadPlugin
   }
@@ -170,9 +168,18 @@ object SomeData {
     }
     newHeader
   }
+  val refs = mutable.Map[String, MyRef]()
+  val headers = mutable.Map[String, SAMFileHeader]()
+  def getRef(r : String) : MyRef = synchronized {
+    refs.getOrElseUpdate(r, new MyRef(r))
+  }
+  def getHeader(r : String) : SAMFileHeader = synchronized {
+    headers.getOrElseUpdate(r, createSamHeader(getRef(r)))
+  }
 }
 
-class SomeData(var r : String, var rapipar : Int) extends Serializable {
+
+class RapiAligner(var r : String, var rapipar : Int) extends Serializable {
   private def writeObject(out : java.io.ObjectOutputStream) {
     out.writeObject(r)
     out.writeInt(rapipar)
@@ -183,17 +190,10 @@ class SomeData(var r : String, var rapipar : Int) extends Serializable {
     init
   }
   def init = synchronized {
-    aligner = new AlignerState(SomeData.getOpts(rapipar))
-    ref = new MyRef(r)
-    header = SomeData.createSamHeader(ref)
-  }
-  def close = synchronized {
-    ref.unload
+    aligner = new AlignerState(RapiAligner.getOpts(rapipar))
   }
   // start here
-  var ref : MyRef = _
-  var header : SAMFileHeader = _
-  var aligner : AlignerState = _
+  var aligner : AlignerState = null
 }
 
 
@@ -225,7 +225,7 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindo
     if (readNum < 1 || readNum > 2)
       throw new IllegalArgumentException(s"readNum $readNum is out of bounds -- only 1 and 2 are supported")
 
-    val out = new SAMRecord(dati.header)
+    val out = new SAMRecord(RapiAligner.getHeader(refPath))
 
     val b = read.getSeq
     val q = read.getQual
@@ -292,8 +292,8 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindo
       }
     }
     // align and get SAMRecord's
-    val mapal = dati.aligner
-    synchronized { mapal.alignReads(dati.ref, reads) }
+    val mapal = ali.aligner
+    synchronized { mapal.alignReads(RapiAligner.getRef(refPath), reads) }
     val sams = reads.flatMap(p => toRec2(p))
     sams.foreach(x => out.collect(x))
   }
@@ -305,13 +305,7 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindo
   override
   def open(conf : Configuration) = {
     // Init
-    dati.init
+    ali.init
   }
-  override
-  def close = {
-    // force munmapping of reference
-    dati.close
-  }
-  val dati = new SomeData(refPath, rapipar)
+  val ali = new RapiAligner(refPath, rapipar)
 }
-

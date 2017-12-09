@@ -27,7 +27,7 @@ import org.apache.kafka.clients.consumer.KafkaConsumer
 import htsjdk.samtools.SAMRecord
 import scala.collection.JavaConversions._
 import scala.concurrent.{ExecutionContext, Await, Future}
-
+import org.apache.flink.streaming.api.windowing.triggers._
 import org.apache.flink.streaming.connectors.fs.bucketing.BucketingSink
 
 import bclconverter.reader.Reader.{Block, PRQData}
@@ -44,9 +44,10 @@ class MyWaterMarker[T] extends AssignerWithPeriodicWatermarks[T] {
   }
 }
 
-class MyDeserializer extends DeserializationSchema[(Int, PRQData)] {
+class MyDeserializer(fpar : Int) extends DeserializationSchema[(Int, PRQData)] {
   var eos = false
   var key = 0
+  var keyspace = 8 * fpar
   override def getProducedType = TypeInformation.of(classOf[(Int, PRQData)])
   override def isEndOfStream(el : (Int, PRQData)) : Boolean = {
     if (el._2._1.size > 1)
@@ -56,7 +57,7 @@ class MyDeserializer extends DeserializationSchema[(Int, PRQData)] {
   }
   override def deserialize(data : Array[Byte]) : (Int, PRQData) = {
     val rkey = key
-    key += 1
+    key = (key + 1) % keyspace
     val (s1, r1) = data.splitAt(4)
     val (p1, d1) = r1.splitAt(toInt(s1))
     val (s2, r2) = d1.splitAt(4)
@@ -139,13 +140,12 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
   def writeToOF(x : (DataStream[SAMRecord], String)) = {
     val wr = new CRAMWriter(pl.sref)
     val fname = x._2 + ".cram"
-    val bucket = new BucketingSink[(LongWritable, SAMRecord)](fname)
+    val bucket = new BucketingSink[SAMRecord](fname)
       .setWriter(wr)
       .setBatchSize(1024 * 1024 * 8)
       .setInactiveBucketCheckInterval(10000)
       .setInactiveBucketThreshold(10000)
     x._1
-      .map(s => (new LongWritable(0), s))
       .addSink(bucket)
       .name(fname)
   }
@@ -157,7 +157,7 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
     props.put("auto.offset.reset", "earliest")
     props.put("enable.auto.commit", "true")
     props.put("auto.commit.interval.ms", "10000")
-    val cons = new FlinkKafkaConsumer010[(Int, PRQData)](topicname, new MyDeserializer, props)
+    val cons = new FlinkKafkaConsumer010[(Int, PRQData)](topicname, new MyDeserializer(pl.flinkpar), props)
       .assignTimestampsAndWatermarks(new MyWaterMarker[(Int, PRQData)])
     val ds = env
       .addSource(cons)
@@ -166,6 +166,7 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
     val sam = ds
       .keyBy(0)
       .timeWindow(Time.milliseconds(pl.rapiwin))
+      //.countWindow(pl.rapiwin)
       .apply(new PRQAligner[TimeWindow](pl.sref, pl.rapipar))
 
     writeToOF(sam, filename)

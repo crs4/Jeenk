@@ -124,11 +124,11 @@ class MyOpts(var rapipar : Int) extends Opts with Serializable {
   private def writeObject(out : java.io.ObjectOutputStream) {
     out.writeInt(rapipar)
   }
-  private def readObject(in : java.io.ObjectInputStream){
+  private def readObject(in : java.io.ObjectInputStream) {
     rapipar = in.readInt
     init
   }
-  def init =  synchronized {
+  def init =  RapiAligner.synchronized {
     setShareRefMem(true)
     setNThreads(rapipar)
     Rapi.init(this)
@@ -141,15 +141,13 @@ object RapiAligner {
     RapiUtils.loadPlugin
   }
   private var opts : MyOpts = null
-  def getOpts(rapipar : Int) : MyOpts = {
-    synchronized {
-      if (opts == null) {
-        opts = new MyOpts(rapipar)
-      }
+  def getOpts(rapipar : Int) : MyOpts = synchronized {
+    if (opts == null) {
+      opts = new MyOpts(rapipar)
     }
     opts
   }
-  def createSamHeader(rapiRef : Ref) : SAMFileHeader = {
+  def createSamHeader(rapiRef : Ref) : SAMFileHeader = synchronized {
     def convertContig(rapiContig : Contig) : SAMSequenceRecord = {
       val sr = new SAMSequenceRecord(rapiContig.getName, rapiContig.getLen.toInt)
       if (rapiContig.getAssemblyIdentifier != null)
@@ -189,7 +187,7 @@ class RapiAligner(var r : String, var rapipar : Int) extends Serializable {
     rapipar = in.readInt
     init
   }
-  def init = synchronized {
+  def init = RapiAligner.synchronized {
     aligner = new AlignerState(RapiAligner.getOpts(rapipar))
   }
   // start here
@@ -198,7 +196,7 @@ class RapiAligner(var r : String, var rapipar : Int) extends Serializable {
 
 
 class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindowFunction[(Int, PRQData), SAMRecord, Tuple, W] {
-  def alignOpToCigarElement(alnOp : AlignOp) : CigarElement = {
+  def alignOpToCigarElement(alnOp : AlignOp) : CigarElement = RapiAligner.synchronized {
     val cigarOp = (alnOp.getType) match {
       case AlignOp.Type.Match => CigarOperator.M
       case AlignOp.Type.Insert => CigarOperator.I
@@ -211,7 +209,7 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindo
     }
     new CigarElement(alnOp.getLen, cigarOp)
   }
-  def cigarRapiToHts(cigars : Seq[AlignOp]) : Cigar = {
+  def cigarRapiToHts(cigars : Seq[AlignOp]) : Cigar = RapiAligner.synchronized {
     new Cigar(cigars.map(alignOpToCigarElement))
   }
   def toRec2(in : Iterable[Read]) : Iterable[SAMRecord] = {
@@ -221,7 +219,7 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindo
 
     List(toRec(r, 1, m), toRec(m, 2, r))
   }
-  def toRec(read : Read, readNum : Int, mate : Read) : SAMRecord = synchronized {
+  def toRec(read : Read, readNum : Int, mate : Read) : SAMRecord = RapiAligner.synchronized {
     if (readNum < 1 || readNum > 2)
       throw new IllegalArgumentException(s"readNum $readNum is out of bounds -- only 1 and 2 are supported")
 
@@ -276,24 +274,20 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindo
     out.setHeader(null)
     out
   }
-  def doJob(in : Iterable[PRQData], out : Collector[SAMRecord]) = {
+  def doJob(in : Iterable[PRQData], out : Collector[SAMRecord]) = RapiAligner.synchronized {
     // insert PRQ data
     var reads : Batch = null
     val chr = java.nio.charset.Charset.forName("US-ASCII")
-    synchronized {
-      reads = new Batch(2)
-      reads.reserve(in.size << 1)
-    }
+    reads = new Batch(2)
+    reads.reserve(in.size << 1)
     in.foreach{ x =>
       val (h, b1, q1, b2, q2) = x
-      synchronized {
-        reads.append(new String(h, chr), new String(b1, chr), new String(q1, chr), RapiConstants.QENC_SANGER)
-        reads.append(new String(h, chr), new String(b2, chr), new String(q2, chr), RapiConstants.QENC_SANGER)
-      }
+      reads.append(new String(h, chr), new String(b1, chr), new String(q1, chr), RapiConstants.QENC_SANGER)
+      reads.append(new String(h, chr), new String(b2, chr), new String(q2, chr), RapiConstants.QENC_SANGER)
     }
     // align and get SAMRecord's
     val mapal = ali.aligner
-    synchronized { mapal.alignReads(RapiAligner.getRef(refPath), reads) }
+    mapal.alignReads(RapiAligner.getRef(refPath), reads)
     val sams = reads.flatMap(p => toRec2(p))
     sams.foreach(x => out.collect(x))
   }

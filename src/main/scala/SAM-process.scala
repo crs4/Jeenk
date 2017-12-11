@@ -128,7 +128,7 @@ class MyOpts(var rapipar : Int) extends Opts with Serializable {
     rapipar = in.readInt
     init
   }
-  def init =  RapiAligner.synchronized {
+  def init =  {
     setShareRefMem(true)
     setNThreads(rapipar)
     Rapi.init(this)
@@ -160,10 +160,8 @@ object RapiAligner {
     }
     def rapiVerStr = s"Rapi plugin - aligner: ${Rapi.getAlignerName}; aligner version: ${Rapi.getAlignerVersion}; plugin version: ${Rapi.getPluginVersion}"
     val newHeader = new SAMFileHeader()
-    synchronized {
-      rapiRef.foreach(contig => newHeader.addSequence(convertContig(contig)))
-      newHeader.addProgramRecord(new SAMProgramRecord("Myname ver x.y.z with " + rapiVerStr))
-    }
+    rapiRef.foreach(contig => newHeader.addSequence(convertContig(contig)))
+    newHeader.addProgramRecord(new SAMProgramRecord("Myname ver x.y.z with " + rapiVerStr))
     newHeader
   }
   val refs = mutable.Map[String, MyRef]()
@@ -171,7 +169,7 @@ object RapiAligner {
   def getRef(r : String) : MyRef = synchronized {
     refs.getOrElseUpdate(r, new MyRef(r))
   }
-  def getHeader(r : String) : SAMFileHeader = synchronized {
+  def getHeader(r : String) : SAMFileHeader = {
     headers.getOrElseUpdate(r, createSamHeader(getRef(r)))
   }
 }
@@ -196,86 +194,88 @@ class RapiAligner(var r : String, var rapipar : Int) extends Serializable {
 
 
 class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindowFunction[(Int, PRQData), SAMRecord, Tuple, W] {
-  def alignOpToCigarElement(alnOp : AlignOp) : CigarElement = RapiAligner.synchronized {
-    val cigarOp = (alnOp.getType) match {
-      case AlignOp.Type.Match => CigarOperator.M
-      case AlignOp.Type.Insert => CigarOperator.I
-      case AlignOp.Type.Delete => CigarOperator.D
-      case AlignOp.Type.SoftClip => CigarOperator.S
-      case AlignOp.Type.HardClip => CigarOperator.H
-      case AlignOp.Type.Skip => CigarOperator.N
-      case AlignOp.Type.Pad => CigarOperator.P
-      case what => throw new IllegalArgumentException("Unexpected align operation " + what)
-    }
-    new CigarElement(alnOp.getLen, cigarOp)
-  }
-  def cigarRapiToHts(cigars : Seq[AlignOp]) : Cigar = RapiAligner.synchronized {
-    new Cigar(cigars.map(alignOpToCigarElement))
-  }
-  def toRec2(in : Iterable[Read]) : Iterable[SAMRecord] = {
-    val in2 = in.toArray
-    val r = in2.head
-    val m = in2.last
-
-    List(toRec(r, 1, m), toRec(m, 2, r))
-  }
-  def toRec(read : Read, readNum : Int, mate : Read) : SAMRecord = RapiAligner.synchronized {
-    if (readNum < 1 || readNum > 2)
-      throw new IllegalArgumentException(s"readNum $readNum is out of bounds -- only 1 and 2 are supported")
-
-    val out = new SAMRecord(RapiAligner.getHeader(refPath))
-
-    val b = read.getSeq
-    val q = read.getQual
-    out.setReadString(b)
-    out.setBaseQualityString(q)
-
-    out.setReadFailsVendorQualityCheckFlag(false)
-    out.setReadName(read.getId)
-    
-    out.setReadPairedFlag(mate != null)
-    out.setFirstOfPairFlag(readNum == 1)
-    out.setSecondOfPairFlag(readNum == 2)
-
-    if (read.getMapped()) {
-      val aln : Alignment = read.getAln(0)
-      out.setReadUnmappedFlag(false)
-      out.setAlignmentStart(aln.getPos)
-      out.setCigar(cigarRapiToHts(aln.getCigarOps))
-      out.setMappingQuality(aln.getMapq)
-      out.setNotPrimaryAlignmentFlag(false)
-      out.setSupplementaryAlignmentFlag(aln.getSecondaryAln)
-      out.setProperPairFlag(read.getPropPaired)
-      out.setReadNegativeStrandFlag(aln.getReverseStrand)
-      out.setReferenceName(aln.getContig.getName)
-
-      if (mate != null) {
-        if (mate.getMapped()) {
-          val mateAln : Alignment = mate.getAln(0)
-          out.setInferredInsertSize(Rapi.getInsertSize(aln, mateAln))
-          out.setMateAlignmentStart(mateAln.getPos)
-          out.setMateNegativeStrandFlag(mateAln.getReverseStrand)
-          out.setMateReferenceName(mateAln.getContig.getName)
-          out.setMateUnmappedFlag(false)
-        }
-        else
-          out.setMateUnmappedFlag(true)
-      }
-      // tags
-      out.setAttribute("NM", new Integer(aln.getNMismatches))
-      out.setAttribute("AS", new Integer(aln.getScore))
-      for (entry <- aln.getTags.entrySet)
-        out.setAttribute(entry.getKey, entry.getValue)
-    }
-    else {
-      out.setReadUnmappedFlag(true)
-    }
-    // remove header, it will be adde back later
-    out.setHeader(null)
-    out
-  }
   def doJob(in : Iterable[PRQData], out : Collector[SAMRecord]) = RapiAligner.synchronized {
-    // insert PRQ data
+    def toRec2(in : Iterable[Read]) : Iterable[SAMRecord] = {
+      def toRec(read : Read, readNum : Int, mate : Read) : SAMRecord = {
+        // some functions
+        def cigarRapiToHts(cigars : Seq[AlignOp]) : Cigar = {
+          def alignOpToCigarElement(alnOp : AlignOp) : CigarElement = {
+            val cigarOp = (alnOp.getType) match {
+              case AlignOp.Type.Match => CigarOperator.M
+              case AlignOp.Type.Insert => CigarOperator.I
+              case AlignOp.Type.Delete => CigarOperator.D
+              case AlignOp.Type.SoftClip => CigarOperator.S
+              case AlignOp.Type.HardClip => CigarOperator.H
+              case AlignOp.Type.Skip => CigarOperator.N
+              case AlignOp.Type.Pad => CigarOperator.P
+              case what => throw new IllegalArgumentException("Unexpected align operation " + what)
+            }
+            new CigarElement(alnOp.getLen, cigarOp)
+          }
+          new Cigar(cigars.map(alignOpToCigarElement))
+        }
+        // toRec starts here
+        if (readNum < 1 || readNum > 2)
+          throw new IllegalArgumentException(s"readNum $readNum is out of bounds -- only 1 and 2 are supported")
+
+        val out = new SAMRecord(RapiAligner.getHeader(refPath))
+
+        val b = read.getSeq
+        val q = read.getQual
+        out.setReadString(b)
+        out.setBaseQualityString(q)
+
+        out.setReadFailsVendorQualityCheckFlag(false)
+        out.setReadName(read.getId)
+        
+        out.setReadPairedFlag(mate != null)
+        out.setFirstOfPairFlag(readNum == 1)
+        out.setSecondOfPairFlag(readNum == 2)
+
+        if (read.getMapped()) {
+          val aln : Alignment = read.getAln(0)
+          out.setReadUnmappedFlag(false)
+          out.setAlignmentStart(aln.getPos)
+          out.setCigar(cigarRapiToHts(aln.getCigarOps))
+          out.setMappingQuality(aln.getMapq)
+          out.setNotPrimaryAlignmentFlag(false)
+          out.setSupplementaryAlignmentFlag(aln.getSecondaryAln)
+          out.setProperPairFlag(read.getPropPaired)
+          out.setReadNegativeStrandFlag(aln.getReverseStrand)
+          out.setReferenceName(aln.getContig.getName)
+
+          if (mate != null) {
+            if (mate.getMapped()) {
+              val mateAln : Alignment = mate.getAln(0)
+              out.setInferredInsertSize(Rapi.getInsertSize(aln, mateAln))
+              out.setMateAlignmentStart(mateAln.getPos)
+              out.setMateNegativeStrandFlag(mateAln.getReverseStrand)
+              out.setMateReferenceName(mateAln.getContig.getName)
+              out.setMateUnmappedFlag(false)
+            }
+            else
+              out.setMateUnmappedFlag(true)
+          }
+          // tags
+          out.setAttribute("NM", new Integer(aln.getNMismatches))
+          out.setAttribute("AS", new Integer(aln.getScore))
+          for (entry <- aln.getTags.entrySet)
+            out.setAttribute(entry.getKey, entry.getValue)
+        }
+        else {
+          out.setReadUnmappedFlag(true)
+        }
+        // remove header, it will be adde back later
+        out.setHeader(null)
+        out
+      }
+      // teRec2 starts here
+      val in2 = in.toArray
+      val r = in2.head
+      val m = in2.last
+      List(toRec(r, 1, m), toRec(m, 2, r))
+    }
+    // doJob starts here
     var reads : Batch = null
     val chr = java.nio.charset.Charset.forName("US-ASCII")
     reads = new Batch(2)

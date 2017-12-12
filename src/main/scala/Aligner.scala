@@ -102,6 +102,7 @@ class PList(param : ParameterTool) extends Serializable{
   val fout = param.getRequired("fout")
   val rapiwin = param.getInt("rapiwin", 1024)
   val flinkpar = param.getInt("writerflinkpar", 1)
+  val crampar = param.getInt("crampar", flinkpar)
   val kafkapar = param.getInt("kafkapar", 1)
   val rapipar = param.getInt("rapipar", 1)
   val wgrouping = param.getInt("wgrouping", 1)
@@ -147,6 +148,7 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
       .setInactiveBucketThreshold(10000)
     x._1
       .addSink(bucket)
+      .setParallelism(pl.crampar)
       .name(fname)
   }
   def add(id : Int, topicname : String, filename : String) {

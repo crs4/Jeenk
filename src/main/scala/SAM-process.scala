@@ -62,7 +62,6 @@ class MySAMRecordWritable extends Writable {
   }
 }
 
-
 // Writer from SAMRecord to CRAM format
 class CRAMWriter(var ref : String) extends StreamWriterBase[SAMRecord] {
   // Serialization
@@ -126,9 +125,9 @@ class MyOpts(var rapipar : Int) extends Opts with Serializable {
   }
   private def readObject(in : java.io.ObjectInputStream) {
     rapipar = in.readInt
-    init
+    RapiAligner.synchronized { init }
   }
-  def init =  {
+  def init = {
     setShareRefMem(true)
     setNThreads(rapipar)
     Rapi.init(this)

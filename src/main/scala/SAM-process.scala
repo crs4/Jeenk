@@ -7,20 +7,18 @@ import htsjdk.samtools.{SAMProgramRecord, SAMRecord, CigarOperator, Cigar, Cigar
 import htsjdk.samtools.{SAMRecord, BAMRecordCodec}
 import it.crs4.rapi.{Alignment, AlignOp, Contig, Read, Fragment, Batch, Ref, AlignerState, Rapi, RapiUtils, RapiConstants, Opts}
 import java.io.{DataOutput, DataInput}
-import org.apache.flink.api.java.hadoop.mapreduce.utils.HadoopUtils
+// import org.apache.flink.api.java.hadoop.mapreduce.utils.HadoopUtils
 import org.apache.flink.api.java.tuple.Tuple
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.runtime.fs.hdfs.HadoopFileSystem
 import org.apache.flink.streaming.api.scala._
+import org.apache.flink.streaming.api.scala.extensions._
 import org.apache.flink.streaming.api.scala.function.{WindowFunction, AllWindowFunction, RichWindowFunction, RichAllWindowFunction}
 import org.apache.flink.streaming.api.windowing.windows.{Window, GlobalWindow, TimeWindow}
 import org.apache.flink.streaming.connectors.fs.{Writer => FWriter, StreamWriterBase}
 import org.apache.flink.util.Collector
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, Path => HPath}
-import org.apache.hadoop.io.Writable
-import org.apache.hadoop.io.{NullWritable, LongWritable}
-import org.apache.hadoop.mapreduce.{Job, JobID, RecordWriter, TaskAttemptContext, TaskAttemptID, OutputCommitter}
 import org.seqdoop.hadoop_bam.util.{DataInputWrapper, DataOutputWrapper}
 import org.seqdoop.hadoop_bam.util.{NIOFileUtil, SAMHeaderReader}
 import org.seqdoop.hadoop_bam.{SAMFormat, AnySAMInputFormat, SAMRecordWritable, CRAMInputFormat, KeyIgnoringCRAMOutputFormat, KeyIgnoringCRAMRecordWriter, KeyIgnoringBAMOutputFormat, KeyIgnoringBAMRecordWriter, KeyIgnoringAnySAMOutputFormat, CRAMRecordWriter, LazyBAMRecordFactory}
@@ -28,39 +26,6 @@ import org.slf4j.LoggerFactory
 import scala.collection.JavaConversions._
 import scala.collection.mutable
 
-
-object MySAMRecordWritable {
-  val lazyCodec = new BAMRecordCodec(null, new LazyBAMRecordFactory)
-}
-
-class MySAMRecordWritable extends Writable {
-  private var record : SAMRecord = _
-  def get = record
-  def set(r : SAMRecord) = {
-    record = r
-  }
-  override
-  def write(out : DataOutput) =  {
-    val codec = new BAMRecordCodec(record.getHeader)
-    codec.setOutputStream(new DataOutputWrapper(out))
-    codec.encode(record)
-  }
-  override
-  def readFields(in : DataInput) = {
-    MySAMRecordWritable.lazyCodec.setInputStream(new DataInputWrapper(in))
-    record = MySAMRecordWritable.lazyCodec.decode
-  }
-  def reset(head : SAMFileHeader) {
-    val pin = new java.io.PipedInputStream
-    val pout = new java.io.PipedOutputStream(pin)
-    val codecw = new BAMRecordCodec(head)
-    codecw.setOutputStream(pout)
-    codecw.encode(record)
-    val codecr = new BAMRecordCodec(head)
-    codecr.setInputStream(pin)
-    record = codecr.decode
-  }
-}
 
 // Writer from SAMRecord to CRAM format
 class CRAMWriter(var ref : String) extends StreamWriterBase[SAMRecord] {
@@ -82,7 +47,7 @@ class CRAMWriter(var ref : String) extends StreamWriterBase[SAMRecord] {
     cramContainerStream.writeAlignment(rec)
   }
   def createHeader = {
-    val conf = HadoopFileSystem.getHadoopConfiguration
+    val conf = new HConf //HadoopFileSystem.getHadoopConfiguration
     header = RapiAligner.getHeader(ref)
     refSource = new ReferenceSource(NIOFileUtil.asPath(ref))
   }
@@ -191,8 +156,11 @@ class RapiAligner(var r : String, var rapipar : Int) extends Serializable {
   var aligner : AlignerState = null
 }
 
+object PRQAligner {
+  val logger = LoggerFactory.getLogger("kafka2parLogger")
+}
 
-class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindowFunction[(Int, PRQData), SAMRecord, Tuple, W] {
+class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindowFunction[(Int, PRQData), SAMRecord, Int, W] {
   def doJob(in : Iterable[PRQData], out : Collector[SAMRecord]) = RapiAligner.synchronized {
     def toRec2(in : Iterable[Read]) : Iterable[SAMRecord] = {
       def toRec(read : Read, readNum : Int, mate : Read) : SAMRecord = {
@@ -290,8 +258,8 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindo
     val sams = reads.flatMap(p => toRec2(p))
     sams.foreach(x => out.collect(x))
   }
-  def apply(key : Tuple, w : W, in : Iterable[(Int, PRQData)], out : Collector[SAMRecord]) = {
-    // insert PRQ data
+  def apply(key : Int, w : W, in : Iterable[(Int, PRQData)], out : Collector[SAMRecord]) = {
+    PRQAligner.logger.info(s"###### rapiwin: ${in.size}")
     val s = in.map(_._2)
     doJob(s, out)
   }

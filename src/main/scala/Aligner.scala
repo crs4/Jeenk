@@ -12,18 +12,14 @@ import org.apache.flink.runtime.state.memory.MemoryStateBackend
 import org.apache.flink.streaming.api.TimeCharacteristic
 import org.apache.flink.streaming.api.functions.AssignerWithPeriodicWatermarks
 import org.apache.flink.streaming.api.scala._
+import org.apache.flink.streaming.api.scala.extensions._
 import org.apache.flink.streaming.api.watermark.Watermark
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.streaming.api.windowing.windows.{Window, TimeWindow, GlobalWindow}
 import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer010, FlinkKafkaProducer010}
 import org.apache.flink.streaming.runtime.operators.windowing.TimestampedValue
 import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, KeyedDeserializationSchema, DeserializationSchema}
-import org.apache.hadoop.conf.{Configuration => HConf}
-import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
-import org.apache.hadoop.io.{NullWritable, LongWritable}
-import org.apache.hadoop.mapreduce.Job
 import org.apache.kafka.clients.consumer.KafkaConsumer
-// import org.seqdoop.hadoop_bam.SAMRecordWritable
 import htsjdk.samtools.SAMRecord
 import scala.collection.JavaConversions._
 import scala.concurrent.{ExecutionContext, Await, Future}
@@ -96,7 +92,7 @@ class ConsProps(pref: String, kafkaServer : String) extends Properties {
   def getCustomInt(key: String) = typesafeConfig.getInt(key)
 }
 
-class PList(param : ParameterTool) extends Serializable{
+class PList(val param : ParameterTool) extends Serializable{
   // parameters
   val root = param.getRequired("root")
   val fout = param.getRequired("fout")
@@ -113,23 +109,10 @@ class PList(param : ParameterTool) extends Serializable{
   val sref = param.getRequired("reference")
 }
 
-object Writer {
-  def MyFS(path : HPath = null) : FileSystem = {
-    var fs : FileSystem = null
-    val conf = new HConf
-    if (path == null)
-      fs = FileSystem.get(conf)
-    else {
-      fs = FileSystem.get(path.toUri, conf);
-    }
-    // return the filesystem
-    fs
-  }
-}
-
 class miniWriter(pl : PList, ind : (Int, Int)) {
   // initialize stream environment
   var env = StreamExecutionEnvironment.getExecutionEnvironment
+  env.getConfig.setGlobalJobParameters(pl.param)
   env.setParallelism(pl.flinkpar)
   env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
   // env.enableCheckpointing(60000)
@@ -166,9 +149,8 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
       .name(topicname)
       .setParallelism(pl.kafkapar)
     val sam = ds
-      .keyBy(0)
+      .keyBy(_._1)
       .timeWindow(Time.milliseconds(pl.flinkpar * pl.rapiwin * 2 / 3))
-      //.countWindow(pl.rapiwin)
       .apply(new PRQAligner[TimeWindow](pl.sref, pl.rapipar))
 
     writeToOF(sam, filename)

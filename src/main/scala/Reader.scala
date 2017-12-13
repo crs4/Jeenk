@@ -5,12 +5,14 @@ import java.nio.ByteBuffer
 import java.util.Properties
 import java.util.concurrent.Executors
 import org.apache.flink.api.java.utils.ParameterTool
+// import org.apache.flink.api.scala._
 import org.apache.flink.streaming.api.scala._
+import org.apache.flink.streaming.api.scala.extensions._
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer010
 import org.apache.flink.streaming.connectors.kafka.partitioner.KafkaPartitioner
 import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, SimpleStringSchema}
 import org.apache.hadoop.conf.{Configuration => HConf}
-import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
+import org.apache.hadoop.fs.{FileSystem, Path => HPath}
 import org.apache.kafka.clients.producer.{Partitioner, KafkaProducer, ProducerRecord}
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
@@ -101,7 +103,7 @@ class fuzzyIndex(sm : Map[(Int, String), String], mm : Int, undet : String) exte
   inds.foreach(k => seen += (k -> k._2))
 }
 
-class RData(param : ParameterTool) extends Serializable {
+class RData(val param : ParameterTool) extends Serializable {
   var header : Block = Array()
   var ranges : Seq[Seq[Int]] = null
   var index : Seq[Seq[Int]] = null
@@ -141,6 +143,7 @@ object Reader {
 class miniReader(var rd : RData, var filenames : Map[(Int, String), String], var f2id : Map[String, Int]) extends Serializable {
   // vars
   val env = StreamExecutionEnvironment.getExecutionEnvironment
+  env.getConfig.setGlobalJobParameters(rd.param)
   env.setParallelism(rd.flinkpar)
   // serialization
   private def writeObject(out : java.io.ObjectOutputStream) {

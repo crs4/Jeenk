@@ -8,12 +8,12 @@ import org.apache.flink.api.java.utils.ParameterTool
 // import org.apache.flink.api.scala._
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.extensions._
-import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer010
-import org.apache.flink.streaming.connectors.kafka.partitioner.KafkaPartitioner
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer011
+import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner
 import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, SimpleStringSchema}
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, Path => HPath}
-import org.apache.kafka.clients.producer.{Partitioner, KafkaProducer, ProducerRecord}
+import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
 import scala.io.Source
@@ -37,12 +37,13 @@ class MyKSerializer extends KeyedSerializationSchema[PRQData] {
   override def getTargetTopic(x : PRQData) : String = null
 }
 
-class MyPartitioner(max : Int) extends KafkaPartitioner[PRQData] {
-  var p = -1
-  override def partition(next : PRQData, serKey : Array[Byte], serVal : Array[Byte], parts : Int) : Int = {
+class MyPartitioner[T](max : Int) extends FlinkKafkaPartitioner[T] {
+  var p = 0
+  override
+  def partition(record : T, serKey : Array[Byte], serVal : Array[Byte], tarTopic : String, parts : Array[Int]) : Int = {
+    val rp = p
     p = (p + 1) % max
-    println(s"partition $p of $max")
-    return p
+    return rp
   }
 }
 
@@ -160,13 +161,14 @@ class miniReader(var rd : RData, var filenames : Map[(Int, String), String], var
     val ds = x._1
     val key = x._2
     val name = rd.kafkaTopic + "-" + key.toString
-    FlinkKafkaProducer010.writeToKafkaWithTimestamps(
-      ds.javaStream,
+    val part : java.util.Optional[FlinkKafkaPartitioner[PRQData]] = java.util.Optional.of(new MyPartitioner[PRQData](runReader.kafkapar))
+    val kprod = new FlinkKafkaProducer011(
       name,
       new MyKSerializer,
-      new ProdProps("outproducer10.", rd.kafkaServer),
-      new MyPartitioner(runReader.kafkapar)
+      new ProdProps("outproducer11.", rd.kafkaServer),
+      part
     )
+    ds.addSink(kprod)
   }
   def procReads(input : (Int, Int)) : Seq[(DataStream[PRQData], Int)] = {
     val (lane, tile) = input
@@ -204,7 +206,7 @@ class miniReader(var rd : RData, var filenames : Map[(Int, String), String], var
 
 class Reader(val param : ParameterTool) {
   val rd = new RData(param)
-  val conProducer = new KafkaProducer[Int, String](new ProdProps("conproducer10.", rd.kafkaServer))
+  val conProducer = new KafkaProducer[Int, String](new ProdProps("conproducer11.", rd.kafkaServer))
   var sampleMap = Map[(Int, String), String]()
   var f2id = Map[String, Int]()
   var lanes = 0
@@ -234,13 +236,14 @@ class Reader(val param : ParameterTool) {
       val EOS : DataStream[PRQData] = env.fromCollection(Array.fill(runReader.kafkapar)(eos))
     EOS.name("EOS")
     f2id.values.foreach{id =>
-      FlinkKafkaProducer010.writeToKafkaWithTimestamps(
-	EOS.javaStream,
+      val part : java.util.Optional[FlinkKafkaPartitioner[PRQData]] = java.util.Optional.of(new MyPartitioner[PRQData](runReader.kafkapar))
+      val kprod = new FlinkKafkaProducer011(
 	rd.kafkaTopic + "-" + id.toString,
 	new MyKSerializer,
-	new ProdProps("outproducer10.", rd.kafkaServer),
-	new MyPartitioner(runReader.kafkapar)
+	new ProdProps("outproducer11.", rd.kafkaServer),
+	part
       )
+      EOS.addSink(kprod)
 		      }
     env.execute("Send EOS's")
   }

@@ -18,7 +18,7 @@ libraryDependencies ++= Seq(
   "org.apache.parquet" % "parquet-avro" % "1.8.1" ,
   "org.apache.flink" %% "flink-streaming-scala" % fver % "provided" ,
   "org.apache.flink" %% "flink-hadoop-compatibility" % fver % "provided" ,
-  "org.apache.flink" %% "flink-connector-kafka-0.10" % fver ,
+  "org.apache.flink" %% "flink-connector-kafka-0.11" % fver ,
   "org.apache.flink" %% "flink-connector-filesystem" % fver
 )
 

@@ -157,10 +157,10 @@ class RapiAligner(var r : String, var rapipar : Int) extends Serializable {
 }
 
 object PRQAligner {
-  val logger = LoggerFactory.getLogger("kafka2parLogger")
+  val logger = LoggerFactory.getLogger("rootLogger")
 }
 
-class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindowFunction[(Int, PRQData), SAMRecord, Int, W] {
+class PRQAligner[W <: Window, Key](refPath : String, rapipar : Int) extends RichWindowFunction[(Key, PRQData), SAMRecord, Key, W] {
   def doJob(in : Iterable[PRQData], out : Collector[SAMRecord]) = RapiAligner.synchronized {
     def toRec2(in : Iterable[Read]) : Iterable[SAMRecord] = {
       def toRec(read : Read, readNum : Int, mate : Read) : SAMRecord = {
@@ -258,8 +258,8 @@ class PRQAligner[W <: Window](refPath : String, rapipar : Int) extends RichWindo
     val sams = reads.flatMap(p => toRec2(p))
     sams.foreach(x => out.collect(x))
   }
-  def apply(key : Int, w : W, in : Iterable[(Int, PRQData)], out : Collector[SAMRecord]) = {
-    PRQAligner.logger.info(s"###### rapiwin: ${in.size}")
+  def apply(k : Key, w : W, in : Iterable[(Key, PRQData)], out : Collector[SAMRecord]) = {
+    // PRQAligner.logger.info(s"###### rapiwin: ${in.size}")
     val s = in.map(_._2)
     doJob(s, out)
   }

@@ -16,20 +16,23 @@ import org.apache.flink.streaming.api.scala.extensions._
 import org.apache.flink.streaming.api.watermark.Watermark
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.streaming.api.windowing.windows.{Window, TimeWindow, GlobalWindow}
-import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer010, FlinkKafkaProducer010}
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer011
 import org.apache.flink.streaming.runtime.operators.windowing.TimestampedValue
 import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, KeyedDeserializationSchema, DeserializationSchema}
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import htsjdk.samtools.SAMRecord
 import scala.collection.JavaConversions._
 import scala.concurrent.{ExecutionContext, Await, Future}
+import scala.collection.mutable.Map
 import org.apache.flink.streaming.api.windowing.triggers._
 import org.apache.flink.streaming.connectors.fs.bucketing.BucketingSink
+import org.slf4j.LoggerFactory
+import org.apache.flink.util.MathUtils
 
 import bclconverter.reader.Reader.{Block, PRQData}
 
 class MyWaterMarker[T] extends AssignerWithPeriodicWatermarks[T] {
-  var cur = 0l
+  @volatile var cur = 0l
   override def extractTimestamp(el: T, prev: Long): Long = {
     val r = cur
     cur += 1
@@ -40,10 +43,31 @@ class MyWaterMarker[T] extends AssignerWithPeriodicWatermarks[T] {
   }
 }
 
-class MyDeserializer(fpar : Int) extends DeserializationSchema[(Int, PRQData)] {
+object MyDeserializer extends Serializable {
+  def invertMurmur(ks : Int) : Array[Int] = {
+    val inv = Map[Int, Int]()
+    val max = org.apache.flink.runtime.state.KeyGroupRangeAssignment.computeDefaultMaxParallelism(ks)
+    var i = 0
+    while(inv.size != ks) {
+      val h = (MathUtils.murmurHash(i) % max) * ks / max
+      if (h <= ks)
+        inv.getOrElseUpdate(h, i)
+      i += 1
+    }
+    Range(0, ks).map(k => inv(k)).toArray
+  }
+  def init(ks : Int) {
+    if (invMurmur == null)
+      invMurmur = MyDeserializer.invertMurmur(ks)
+  }
+  val logger = LoggerFactory.getLogger("rootLogger")
+  @volatile var invMurmur : Array[Int] = null
+}
+
+class MyDeserializer(val fpar : Int) extends DeserializationSchema[(Int, PRQData)] {
   var eos = false
-  var key = 0
-  var keyspace = 8 * fpar
+  @volatile var key = 0
+  var invMurmur : Array[Int] = null
   override def getProducedType = TypeInformation.of(classOf[(Int, PRQData)])
   override def isEndOfStream(el : (Int, PRQData)) : Boolean = {
     if (el._2._1.size > 1)
@@ -52,8 +76,10 @@ class MyDeserializer(fpar : Int) extends DeserializationSchema[(Int, PRQData)] {
       true
   }
   override def deserialize(data : Array[Byte]) : (Int, PRQData) = {
-    val rkey = key
-    key = (key + 1) % keyspace
+    if (invMurmur == null)
+      setMurmur
+    val rkey = invMurmur(key)
+    key = (key + 1) % fpar
     val (s1, r1) = data.splitAt(4)
     val (p1, d1) = r1.splitAt(toInt(s1))
     val (s2, r2) = d1.splitAt(4)
@@ -68,6 +94,10 @@ class MyDeserializer(fpar : Int) extends DeserializationSchema[(Int, PRQData)] {
   def toInt(a : Array[Byte]) : Int = {
     ByteBuffer.wrap(a).getInt
   }
+  def setMurmur {
+    MyDeserializer.init(fpar)
+    invMurmur = MyDeserializer.invMurmur
+  }
 }
 
 object ConsProps {
@@ -76,7 +106,7 @@ object ConsProps {
 
 class ConsProps(pref: String, kafkaServer : String) extends Properties {
   private val pkeys = Seq("bootstrap.servers", "group.id", "request.timeout.ms",
-  "value.deserializer", "key.deserializer", "auto.offset.reset").map(pref + _)
+    "value.deserializer", "key.deserializer", "auto.offset.reset").map(pref + _)
   lazy val typesafeConfig = ConfigFactory.load()
 
   pkeys.map{ key =>
@@ -138,11 +168,11 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
     jobs ::= (id, topicname, filename)
   }
   def doJob(id : Int, topicname : String, filename : String) = {
-    val props = new ConsProps("outconsumer10.", pl.kafkaServer)
+    val props = new ConsProps("outconsumer11.", pl.kafkaServer)
     props.put("auto.offset.reset", "earliest")
     props.put("enable.auto.commit", "true")
     props.put("auto.commit.interval.ms", "10000")
-    val cons = new FlinkKafkaConsumer010[(Int, PRQData)](topicname, new MyDeserializer(pl.flinkpar), props)
+    val cons = new FlinkKafkaConsumer011[(Int, PRQData)](topicname, new MyDeserializer(pl.flinkpar), props)
       .assignTimestampsAndWatermarks(new MyWaterMarker[(Int, PRQData)])
     val ds = env
       .addSource(cons)
@@ -150,8 +180,8 @@ class miniWriter(pl : PList, ind : (Int, Int)) {
       .setParallelism(pl.kafkapar)
     val sam = ds
       .keyBy(_._1)
-      .timeWindow(Time.milliseconds(pl.flinkpar * pl.rapiwin * 2 / 3))
-      .apply(new PRQAligner[TimeWindow](pl.sref, pl.rapipar))
+      .timeWindow(Time.milliseconds(pl.rapiwin * pl.flinkpar / pl.kafkapar))
+      .apply(new PRQAligner[TimeWindow, Int](pl.sref, pl.rapipar))
 
     writeToOF(sam, filename)
   }
@@ -195,7 +225,7 @@ object runWriter {
 
     val pl = new PList(params)
     val rg = new scala.util.Random
-    val cp = new ConsProps("conconsumer10.", pl.kafkaServer)
+    val cp = new ConsProps("conconsumer11.", pl.kafkaServer)
     cp.put("auto.offset.reset", "earliest")
     cp.put("enable.auto.commit", "true")
     cp.put("auto.commit.interval.ms", "10000")
@@ -216,3 +246,4 @@ object runWriter {
     conConsumer.close
   }
 }
+

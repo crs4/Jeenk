@@ -32,7 +32,7 @@ import org.apache.flink.util.MathUtils
 import bclconverter.reader.Reader.{Block, PRQData}
 
 class MyWaterMarker[T] extends AssignerWithPeriodicWatermarks[T] {
-  @volatile var cur = 0l
+  var cur = 0l
   override def extractTimestamp(el: T, prev: Long): Long = {
     val r = cur
     cur += 1
@@ -66,7 +66,7 @@ object MyDeserializer extends Serializable {
 
 class MyDeserializer(val fpar : Int) extends DeserializationSchema[(Int, PRQData)] {
   var eos = false
-  @volatile var key = 0
+  var key = 0
   var invMurmur : Array[Int] = null
   override def getProducedType = TypeInformation.of(classOf[(Int, PRQData)])
   override def isEndOfStream(el : (Int, PRQData)) : Boolean = {

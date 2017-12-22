@@ -105,13 +105,13 @@ object RapiAligner {
     RapiUtils.loadPlugin
   }
   private var opts : MyOpts = null
-  def getOpts(rapipar : Int) : MyOpts = synchronized {
+  def getOpts(rapipar : Int) : MyOpts = {
     if (opts == null) {
       opts = new MyOpts(rapipar)
     }
     opts
   }
-  def createSamHeader(rapiRef : Ref) : SAMFileHeader = synchronized {
+  def createSamHeader(rapiRef : Ref) : SAMFileHeader =  {
     def convertContig(rapiContig : Contig) : SAMSequenceRecord = {
       val sr = new SAMSequenceRecord(rapiContig.getName, rapiContig.getLen.toInt)
       if (rapiContig.getAssemblyIdentifier != null)
@@ -130,7 +130,7 @@ object RapiAligner {
   }
   val refs = mutable.Map[String, MyRef]()
   val headers = mutable.Map[String, SAMFileHeader]()
-  def getRef(r : String) : MyRef = synchronized {
+  def getRef(r : String) : MyRef = {
     refs.getOrElseUpdate(r, new MyRef(r))
   }
   def getHeader(r : String) : SAMFileHeader = {

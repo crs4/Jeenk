@@ -169,6 +169,7 @@ class miniReader(var rd : RData, var filenames : Map[(Int, String), String], var
       part
     )
     ds.addSink(kprod)
+      .name(name)
   }
   def procReads(input : (Int, Int)) : Seq[(DataStream[PRQData], Int)] = {
     val (lane, tile) = input

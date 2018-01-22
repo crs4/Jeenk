@@ -1,4 +1,4 @@
-package bclconverter.aligner
+package bclconverter.sam
 
 import bclconverter.reader.Reader.{Block, PRQData}
 import com.typesafe.config.ConfigFactory
@@ -104,10 +104,12 @@ object RapiAligner {
   synchronized {
     RapiUtils.loadPlugin
   }
-  private var opts : MyOpts = null
+  private var rp = 1
+  private var opts = new MyOpts(rp)
   def getOpts(rapipar : Int) : MyOpts = {
-    if (opts == null) {
+    if (rapipar != rp) {
       opts = new MyOpts(rapipar)
+      rp = rapipar
     }
     opts
   }
@@ -139,13 +141,13 @@ object RapiAligner {
 }
 
 
-class RapiAligner(var r : String, var rapipar : Int) extends Serializable {
+class RapiAligner(var rapipar : Int) extends Serializable {
   private def writeObject(out : java.io.ObjectOutputStream) {
-    out.writeObject(r)
+    // out.writeObject(r)
     out.writeInt(rapipar)
   }
   private def readObject(in : java.io.ObjectInputStream){
-    r = in.readObject.asInstanceOf[String]
+    // r = in.readObject.asInstanceOf[String]
     rapipar = in.readInt
     init
   }
@@ -268,5 +270,5 @@ class PRQAligner[W <: Window, Key](refPath : String, rapipar : Int) extends Rich
     // Init
     ali.init
   }
-  val ali = new RapiAligner(refPath, rapipar)
+  val ali = new RapiAligner(rapipar)
 }

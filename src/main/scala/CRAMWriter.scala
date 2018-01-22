@@ -1,8 +1,13 @@
-package bclconverter.aligner
+package bclconverter.writer
 
 import com.typesafe.config.ConfigFactory
+import htsjdk.samtools.SAMRecord
+import java.nio.ByteBuffer
+import java.util.Properties
 import java.util.concurrent.Executors
+import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.utils.ParameterTool
+import org.apache.flink.configuration.Configuration
 import org.apache.flink.runtime.state.filesystem.FsStateBackend
 import org.apache.flink.runtime.state.memory.MemoryStateBackend
 import org.apache.flink.streaming.api.TimeCharacteristic
@@ -11,51 +16,42 @@ import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.extensions._
 import org.apache.flink.streaming.api.watermark.Watermark
 import org.apache.flink.streaming.api.windowing.time.Time
-import org.apache.flink.streaming.api.windowing.windows.{Window, TimeWindow, GlobalWindow}
-import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer011, FlinkKafkaProducer011}
-import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner
-import org.apache.flink.streaming.runtime.operators.windowing.TimestampedValue
-import org.apache.kafka.clients.consumer.KafkaConsumer
-import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
-import htsjdk.samtools.SAMRecord
-import scala.collection.JavaConversions._
-import scala.concurrent.{ExecutionContext, Await, Future}
 import org.apache.flink.streaming.api.windowing.triggers._
+import org.apache.flink.streaming.api.windowing.windows.{Window, TimeWindow, GlobalWindow}
 import org.apache.flink.streaming.connectors.fs.bucketing.BucketingSink
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer011
+import org.apache.flink.streaming.runtime.operators.windowing.TimestampedValue
+import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, KeyedDeserializationSchema, DeserializationSchema}
+import org.apache.flink.util.MathUtils
+import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.slf4j.LoggerFactory
+import scala.collection.JavaConversions._
+import scala.collection.mutable.Map
+import scala.concurrent.{ExecutionContext, Await, Future}
 
-import bclconverter.reader.Reader.{Block, PRQData}
 import bclconverter.kafka.{MySSerializer, MyPartitioner, ProdProps, ConsProps, MyDeserializer, MySDeserializer}
+import bclconverter.reader.Reader.{Block}
+import bclconverter.aligner.MyWaterMarker
 
-class MyWaterMarker[T] extends AssignerWithPeriodicWatermarks[T] {
-  var cur = 0l
-  override def extractTimestamp(el: T, prev: Long): Long = {
-    val r = cur
-    cur += 1
-    return r
-  }
-  override def getCurrentWatermark : Watermark = {
-    new Watermark(cur - 1)
-  }
-}
 
-class PList(val param : ParameterTool) extends Serializable{
+class WList(val param : ParameterTool) extends Serializable{
   // parameters
   val root = param.getRequired("root")
+  val fout = param.getRequired("fout")
   val rapiwin = param.getInt("rapiwin", 1024)
   val flinkpar = param.getInt("writerflinkpar", 1)
+  val crampar = param.getInt("crampar", flinkpar)
   val kafkapar = param.getInt("kafkapar", 1)
   val rapipar = param.getInt("rapipar", 1)
   val wgrouping = param.getInt("wgrouping", 1)
   val kafkaServer = param.get("kafkaServer", "127.0.0.1:9092")
-  val kafkaTopic = param.get("kafkaTopic", "flink-prq")
   val kafkaAligned = param.get("kafkaAligned", "flink-aligned")
   val kafkaControl = param.get("kafkaControl", "flink-con")
   val stateBE = param.getRequired("stateBE")
   val sref = param.getRequired("reference")
 }
 
-class miniAligner(pl : PList, ind : (Int, Int)) {
+class miniWriter(pl : WList, ind : (Int, Int)) {
   // initialize stream environment
   var env = StreamExecutionEnvironment.getExecutionEnvironment
   env.getConfig.setGlobalJobParameters(pl.param)
@@ -67,17 +63,18 @@ class miniAligner(pl : PList, ind : (Int, Int)) {
   // env.getCheckpointConfig.setMaxConcurrentCheckpoints(1)
   env.setStateBackend(new FsStateBackend(pl.stateBE, true))
   var jobs = List[(Int, String, String)]()
-  def sendAligned(x : (DataStream[SAMRecord], Int)) = {
-    val name = pl.kafkaAligned + "-" + x._2.toString
-    val part : java.util.Optional[FlinkKafkaPartitioner[SAMRecord]] = java.util.Optional.of(new MyPartitioner[SAMRecord](pl.kafkapar))
-    val kprod = new FlinkKafkaProducer011(
-      name,
-      new MySSerializer,
-      new ProdProps("outproducer11.", pl.kafkaServer),
-      part
-    )
-    x._1.addSink(kprod)
-      .name(name)
+  def writeToOF(x : (DataStream[SAMRecord], String)) = {
+    val wr = new bclconverter.sam.CRAMWriter(pl.sref)
+    val fname = pl.fout + x._2 + ".cram"
+    val bucket = new BucketingSink[SAMRecord](fname)
+      .setWriter(wr)
+      .setBatchSize(1024 * 1024 * 8)
+      .setInactiveBucketCheckInterval(10000)
+      .setInactiveBucketThreshold(10000)
+    x._1
+      .addSink(bucket)
+      .setParallelism(pl.crampar)
+      .name(fname)
   }
   def add(id : Int, topicname : String, filename : String) {
     jobs ::= (id, topicname, filename)
@@ -87,62 +84,35 @@ class miniAligner(pl : PList, ind : (Int, Int)) {
     props.put("auto.offset.reset", "earliest")
     props.put("enable.auto.commit", "true")
     props.put("auto.commit.interval.ms", "10000")
-    val cons = new FlinkKafkaConsumer011[(Int, PRQData)](topicname, new MyDeserializer(pl.flinkpar), props)
-    val ds = env
+    val cons = new FlinkKafkaConsumer011[SAMRecord](topicname, new MySDeserializer(pl.flinkpar), props)
+    val sam = env
       .addSource(cons)
       .setParallelism(pl.kafkapar)
-      .assignTimestampsAndWatermarks(new MyWaterMarker[(Int, PRQData)])
+      .assignTimestampsAndWatermarks(new MyWaterMarker[SAMRecord])
       .name(topicname)
-    val sam = ds
-      .keyBy(_._1)
-      .timeWindow(Time.milliseconds(pl.rapiwin * pl.flinkpar / pl.kafkapar))
-      .apply(new bclconverter.sam.PRQAligner[TimeWindow, Int](pl.sref, pl.rapipar))
 
-    // send data to topic
-    sendAligned(sam, id)
-  }
-  // send EOS to each kafka partition, for each topic
-  def sendEOS(id : Int) = {
-    env.setParallelism(1)
-    val name = pl.kafkaAligned + "-" + id.toString
-    val eos  = new SAMRecord(null)
-    eos.setReadName(MySDeserializer.eos_tag)
-    val EOS : DataStream[SAMRecord] = env.fromCollection(Array.fill(pl.kafkapar)(eos))
-    EOS.name("EOS")
-    val part : java.util.Optional[FlinkKafkaPartitioner[SAMRecord]] = java.util.Optional.of(new MyPartitioner[SAMRecord](pl.kafkapar))
-    val kprod = new FlinkKafkaProducer011(
-      name,
-      new MySSerializer,
-      new ProdProps("outproducer11.", pl.kafkaServer),
-      part
-    )
-    EOS.addSink(kprod)
-       .name(name)
+    writeToOF(sam, filename)
   }
   def go = {
     jobs.foreach(j => doJob(j._1, j._2, j._3))
-    env.execute(s"Aligner ${ind._1}/${ind._2}")
-    jobs.foreach(j => sendEOS(j._1))
-    env.execute("Send EOS ${ind._1}/${ind._2}")
+    env.execute(s"CRAM Writer ${ind._1}/${ind._2}")
   }
 }
 
-class Aligner(pl : PList) {
-  val conProducer = new KafkaProducer[Int, String](new ProdProps("conproducer11.", pl.kafkaServer))
-  def kafkaAligner(toc : Array[String]) : Iterable[miniAligner] = {
+class Writer(pl : WList) {
+  def kafka2cram(toc : Array[String]) : Iterable[miniWriter] = {
     val filenames = toc
       .map(s => s.split(" ", 2))
       .map(r => (r.head, r.last)).toMap
-    def RW(ids : Iterable[Int], ind : (Int, Int)) : miniAligner = {
-      val mw = new miniAligner(pl, ind)
+    def RW(ids : Iterable[Int], ind : (Int, Int)) : miniWriter = {
+      val mw = new miniWriter(pl, ind)
       ids.foreach{
         id =>
-        val topicname = pl.kafkaTopic + "-" + id.toString
+        val topicname = pl.kafkaAligned + "-" + id.toString
         mw.add(id, topicname, filenames(id.toString))
       }
       mw
     }
-    conProducer.send(new ProducerRecord(pl.kafkaControl, 1, toc.mkString("\n")))
     val ids = filenames.keys.map(_.toInt)
     val g = ids.grouped(pl.wgrouping).toArray
     val n = g.size
@@ -150,7 +120,7 @@ class Aligner(pl : PList) {
   }
 }
 
-object runAligner {
+object runWriter {
   def main(args: Array[String]) {
     val pargs = ParameterTool.fromArgs(args)
     val propertiesFile = pargs.getRequired("properties")
@@ -161,25 +131,25 @@ object runAligner {
     implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
     // implicit val timeout = Timeout(30 seconds)
 
-    val pl = new PList(params)
+    val pl = new WList(params)
     val rg = new scala.util.Random
     val cp = new ConsProps("conconsumer11.", pl.kafkaServer)
     cp.put("auto.offset.reset", "earliest")
     cp.put("enable.auto.commit", "true")
     cp.put("auto.commit.interval.ms", "10000")
     val conConsumer = new KafkaConsumer[Void, String](cp)
-    val rw = new Aligner(pl)
+    val rw = new Writer(pl)
     conConsumer.subscribe(List(pl.kafkaControl))
     var jobs = List[Future[Any]]()
     while (true) {
       val records = conConsumer.poll(3000)
       // records.foreach(_ => println("Adding job..."))
       jobs ++= records
-        .filter(_.key == 0)
+        .filter(_.key == 1)
         .flatMap
       {
 	r =>
-	  rw.kafkaAligner(r.value.split("\n"))
+	  rw.kafka2cram(r.value.split("\n"))
 	    .map(j => Future{j.go})
       }
     }

@@ -20,56 +20,7 @@ import scala.io.Source
 import scala.xml.{XML, Node}
 
 import Reader.{Block, PRQData}
-
-class MyKSerializer extends KeyedSerializationSchema[PRQData] {
-  def toBytes(i : Int) : Array[Byte] = {
-    ByteBuffer.allocate(4).putInt(i).array
-  }
-  override def serializeValue(x : PRQData) : Array[Byte] = {
-    val r = toBytes(x._1.size) ++ x._1 ++
-      toBytes(x._2.size) ++ x._2 ++
-      toBytes(x._3.size) ++ x._3 ++
-      toBytes(x._4.size) ++ x._4 ++
-      toBytes(x._5.size) ++ x._5
-    return r
-  }
-  override def serializeKey(x : PRQData) : Array[Byte] = null
-  override def getTargetTopic(x : PRQData) : String = null
-}
-
-class MyPartitioner[T](max : Int) extends FlinkKafkaPartitioner[T] {
-  var p = 0
-  override
-  def partition(record : T, serKey : Array[Byte], serVal : Array[Byte], tarTopic : String, parts : Array[Int]) : Int = {
-    val rp = p
-    p = (p + 1) % max
-    return rp
-  }
-}
-
-object ProdProps {
-  val rg = new scala.util.Random
-}
-
-class ProdProps(pref : String, kafkaServer : String) extends Properties {
-  private val pkeys = Seq("bootstrap.servers", "acks", "compression.type", "key.serializer", "value.serializer",
-    "batch.size", "linger.ms", "request.timeout.ms").map(pref + _)
-
-  lazy val typesafeConfig = ConfigFactory.load()
-
-  pkeys.map{ key =>
-    if (typesafeConfig.hasPath(key))
-      put(key.replace(pref, ""), typesafeConfig.getString(key))
-  }
-  put("client.id", "robo" + ProdProps.rg.nextLong.toString)
-  put("retries", "5")
-  put("max.in.flight.requests.per.connection", "1")
-  put("bootstrap.servers", kafkaServer)
-
-
-  def getCustomString(key: String) = typesafeConfig.getString(key)
-  def getCustomInt(key: String) = typesafeConfig.getInt(key)
-}
+import bclconverter.kafka.{MyKSerializer, MyPartitioner, ProdProps}
 
 
 class fuzzyIndex(sm : Map[(Int, String), String], mm : Int, undet : String) extends Serializable {
@@ -112,7 +63,6 @@ class RData(val param : ParameterTool) extends Serializable {
   // parameters
   val root = param.getRequired("root")
   val samplePath = param.get("sample-sheet", root + "SampleSheet.csv")
-  val fout = param.getRequired("fout")
   val bdir = param.get("bdir", "Data/Intensities/BaseCalls/")
   val adapter = param.get("adapter", null)
   val bsize = param.getInt("bsize", 2048)
@@ -215,18 +165,18 @@ class Reader(val param : ParameterTool) {
   def setFilenames = {
     // Uncomment next lines if you want "Undetermined" reads in the output as well
     // for (lane <- 1 to lanes){
-    //   filenames ++= Map((lane, rd.undet) -> new String(f"${rd.fout}${rd.undet}"))
+    //   filenames ++= Map((lane, rd.undet) -> new String(f"${rd.undet}"))
     // }
     filenames ++= sampleMap
       .map {
-      case (k, pref) => ((k._1, k._2) -> new String(f"${rd.fout}${pref}"))
+      case (k, pref) => ((k._1, k._2) -> new String(f"${pref}"))
     }
   }
   def sendTOC = {
     val fns = filenames.values.toArray
     f2id = fns.indices.map(i => (fns(i), i)).toMap
     val toclines = f2id.toArray.map{case (n, i) => s"$i $n"}
-    conProducer.send(new ProducerRecord(rd.kafkaControl, toclines.mkString("\n")))
+    conProducer.send(new ProducerRecord(rd.kafkaControl, 0, toclines.mkString("\n")))
   }
   // send EOS to each kafka partition, for each topic
   def sendEOS = {

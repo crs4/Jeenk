@@ -4,7 +4,7 @@ import com.typesafe.config.ConfigFactory
 import htsjdk.samtools.SAMRecord
 import java.nio.ByteBuffer
 import java.util.Properties
-import java.util.concurrent.Executors
+import java.util.concurrent.{Executors, TimeoutException}
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.configuration.Configuration
@@ -27,6 +27,7 @@ import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.slf4j.LoggerFactory
 import scala.collection.JavaConversions._
 import scala.collection.mutable.Map
+import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
 
 import bclconverter.kafka.{MySSerializer, MyPartitioner, ProdProps, ConsProps, MyDeserializer, MySDeserializer}
@@ -34,13 +35,12 @@ import bclconverter.reader.Reader.{Block}
 import bclconverter.aligner.MyWaterMarker
 
 
-class WList(val param : ParameterTool) extends Serializable{
+class WList(val param : ParameterTool) extends Serializable {
   // parameters
   val root = param.getRequired("root")
   val fout = param.getRequired("fout")
   val rapiwin = param.getInt("rapiwin", 1024)
-  val flinkpar = param.getInt("writerflinkpar", 1)
-  val crampar = param.getInt("crampar", flinkpar)
+  val crampar = param.getInt("crampar", 1)
   val kafkapar = param.getInt("kafkapar", 1)
   val rapipar = param.getInt("rapipar", 1)
   val wgrouping = param.getInt("wgrouping", 1)
@@ -49,13 +49,13 @@ class WList(val param : ParameterTool) extends Serializable{
   val kafkaControl = param.get("kafkaControl", "flink-con")
   val stateBE = param.getRequired("stateBE")
   val sref = param.getRequired("reference")
+  val cramwriterTimeout = param.getInt("cramwriterTimeout", 0)
 }
 
 class miniWriter(pl : WList, ind : (Int, Int)) {
   // initialize stream environment
   var env = StreamExecutionEnvironment.getExecutionEnvironment
   env.getConfig.setGlobalJobParameters(pl.param)
-  env.setParallelism(pl.flinkpar)
   env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
   // env.enableCheckpointing(30000)
   // env.getCheckpointConfig.setMinPauseBetweenCheckpoints(15000)
@@ -84,7 +84,7 @@ class miniWriter(pl : WList, ind : (Int, Int)) {
     props.put("auto.offset.reset", "earliest")
     props.put("enable.auto.commit", "true")
     props.put("auto.commit.interval.ms", "10000")
-    val cons = new FlinkKafkaConsumer011[SAMRecord](topicname, new MySDeserializer(pl.flinkpar), props)
+    val cons = new FlinkKafkaConsumer011[SAMRecord](topicname, new MySDeserializer(pl.kafkapar), props)
     val sam = env
       .addSource(cons)
       .setParallelism(pl.kafkapar)
@@ -137,13 +137,14 @@ object runWriter {
     cp.put("auto.offset.reset", "earliest")
     cp.put("enable.auto.commit", "true")
     cp.put("auto.commit.interval.ms", "10000")
-    val conConsumer = new KafkaConsumer[Void, String](cp)
+    val conConsumer = new KafkaConsumer[Int, String](cp)
     val rw = new Writer(pl)
     conConsumer.subscribe(List(pl.kafkaControl))
     var jobs = List[Future[Any]]()
-    while (true) {
+    val startTime = java.time.Instant.now.getEpochSecond
+    var goOn = true
+    while (goOn) {
       val records = conConsumer.poll(3000)
-      // records.foreach(_ => println("Adding job..."))
       jobs ++= records
         .filter(_.key == 1)
         .flatMap
@@ -151,6 +152,15 @@ object runWriter {
 	r =>
 	  rw.kafka2cram(r.value.split("\n"))
 	    .map(j => Future{j.go})
+      }
+      // stay in loop until jobs are done or timeout not expired
+      val now = java.time.Instant.now.getEpochSecond
+      goOn = pl.cramwriterTimeout <= 0 || now < startTime + pl.cramwriterTimeout
+      val aggregated = Future.sequence(jobs)
+      try {
+        Await.ready(aggregated, 100 millisecond)
+      } catch {
+        case e: TimeoutException => goOn = true
       }
     }
     conConsumer.close

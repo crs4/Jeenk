@@ -1,7 +1,8 @@
 package bclconverter.aligner
 
 import com.typesafe.config.ConfigFactory
-import java.util.concurrent.Executors
+import htsjdk.samtools.SAMRecord
+import java.util.concurrent.{Executors, TimeoutException}
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.runtime.state.filesystem.FsStateBackend
 import org.apache.flink.runtime.state.memory.MemoryStateBackend
@@ -11,18 +12,18 @@ import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.extensions._
 import org.apache.flink.streaming.api.watermark.Watermark
 import org.apache.flink.streaming.api.windowing.time.Time
+import org.apache.flink.streaming.api.windowing.triggers._
 import org.apache.flink.streaming.api.windowing.windows.{Window, TimeWindow, GlobalWindow}
-import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer011, FlinkKafkaProducer011}
+import org.apache.flink.streaming.connectors.fs.bucketing.BucketingSink
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner
+import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer011, FlinkKafkaProducer011}
 import org.apache.flink.streaming.runtime.operators.windowing.TimestampedValue
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
-import htsjdk.samtools.SAMRecord
-import scala.collection.JavaConversions._
-import scala.concurrent.{ExecutionContext, Await, Future}
-import org.apache.flink.streaming.api.windowing.triggers._
-import org.apache.flink.streaming.connectors.fs.bucketing.BucketingSink
 import org.slf4j.LoggerFactory
+import scala.collection.JavaConversions._
+import scala.concurrent.duration._
+import scala.concurrent.{ExecutionContext, Await, Future}
 
 import bclconverter.reader.Reader.{Block, PRQData}
 import bclconverter.kafka.{MySSerializer, MyPartitioner, ProdProps, ConsProps, MyDeserializer, MySDeserializer}
@@ -43,16 +44,17 @@ class PList(val param : ParameterTool) extends Serializable{
   // parameters
   val root = param.getRequired("root")
   val rapiwin = param.getInt("rapiwin", 1024)
-  val flinkpar = param.getInt("writerflinkpar", 1)
+  val flinkpar = param.getInt("alignerflinkpar", 1)
   val kafkapar = param.getInt("kafkapar", 1)
   val rapipar = param.getInt("rapipar", 1)
-  val wgrouping = param.getInt("wgrouping", 1)
+  val agrouping = param.getInt("agrouping", 1)
   val kafkaServer = param.get("kafkaServer", "127.0.0.1:9092")
   val kafkaTopic = param.get("kafkaTopic", "flink-prq")
   val kafkaAligned = param.get("kafkaAligned", "flink-aligned")
   val kafkaControl = param.get("kafkaControl", "flink-con")
   val stateBE = param.getRequired("stateBE")
   val sref = param.getRequired("reference")
+  val alignerTimeout = param.getInt("alignerTimeout", 0)
 }
 
 class miniAligner(pl : PList, ind : (Int, Int)) {
@@ -123,7 +125,7 @@ class miniAligner(pl : PList, ind : (Int, Int)) {
     jobs.foreach(j => doJob(j._1, j._2, j._3))
     env.execute(s"Aligner ${ind._1}/${ind._2}")
     jobs.foreach(j => sendEOS(j._1))
-    env.execute("Send EOS ${ind._1}/${ind._2}")
+    env.execute(s"Send EOS ${ind._1}/${ind._2}")
   }
 }
 
@@ -144,7 +146,7 @@ class Aligner(pl : PList) {
     }
     conProducer.send(new ProducerRecord(pl.kafkaControl, 1, toc.mkString("\n")))
     val ids = filenames.keys.map(_.toInt)
-    val g = ids.grouped(pl.wgrouping).toArray
+    val g = ids.grouped(pl.agrouping).toArray
     val n = g.size
     g.indices.map(i => RW(g(i), (i+1, n)))
   }
@@ -157,7 +159,7 @@ object runAligner {
     val pfile = ParameterTool.fromPropertiesFile(propertiesFile)
     val params = pfile.mergeWith(pargs)
 
-    val numTasks = params.getInt("numWriters") // concurrent flink tasks to be run
+    val numTasks = params.getInt("numAligners") // concurrent flink tasks to be run
     implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
     // implicit val timeout = Timeout(30 seconds)
 
@@ -167,13 +169,15 @@ object runAligner {
     cp.put("auto.offset.reset", "earliest")
     cp.put("enable.auto.commit", "true")
     cp.put("auto.commit.interval.ms", "10000")
-    val conConsumer = new KafkaConsumer[Void, String](cp)
+    val conConsumer = new KafkaConsumer[Int, String](cp)
     val rw = new Aligner(pl)
     conConsumer.subscribe(List(pl.kafkaControl))
     var jobs = List[Future[Any]]()
-    while (true) {
+    val startTime = java.time.Instant.now.getEpochSecond
+    var goOn = true
+
+    while (goOn) {
       val records = conConsumer.poll(3000)
-      // records.foreach(_ => println("Adding job..."))
       jobs ++= records
         .filter(_.key == 0)
         .flatMap
@@ -181,6 +185,15 @@ object runAligner {
 	r =>
 	  rw.kafkaAligner(r.value.split("\n"))
 	    .map(j => Future{j.go})
+      }
+      // stay in loop until jobs are done or timeout not expired
+      val now = java.time.Instant.now.getEpochSecond
+      goOn = pl.alignerTimeout <= 0 || now < startTime + pl.alignerTimeout
+      val aggregated = Future.sequence(jobs)
+      try {
+        Await.ready(aggregated, 100 millisecond)
+      } catch {
+        case e: TimeoutException => goOn = true
       }
     }
     conConsumer.close

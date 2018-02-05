@@ -13,9 +13,11 @@ import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartiti
 import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, SimpleStringSchema}
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, Path => HPath}
+import org.apache.kafka.clients.admin._
 import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
+import scala.collection.JavaConversions._
 import scala.io.Source
 import scala.xml.{XML, Node}
 
@@ -107,10 +109,23 @@ class miniReader(var rd : RData, var filenames : Map[(Int, String), String], var
     filenames = in.readObject.asInstanceOf[Map[(Int, String), String]]
     f2id = in.readObject.asInstanceOf[Map[String, Int]]
   }
+  def createKTopic(topic : String) = {
+    val props = new Properties
+    props.setProperty(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, rd.kafkaServer)
+    val adminClient = AdminClient.create(props)
+    val newTopic = new NewTopic(topic, runReader.kafkapar, 1)
+    try {
+      val fut = adminClient.createTopics(List(newTopic))
+      fut.all.get
+    } catch {
+      case _ : java.util.concurrent.ExecutionException => // topic already exists
+    }
+  }
   def kafkize(x : (DataStream[PRQData], Int)) = {
     val ds = x._1
     val key = x._2
     val name = rd.kafkaTopic + "-" + key.toString
+    createKTopic(name)
     val part : java.util.Optional[FlinkKafkaPartitioner[PRQData]] = java.util.Optional.of(new MyPartitioner[PRQData](runReader.kafkapar))
     val kprod = new FlinkKafkaProducer011(
       name,
@@ -149,7 +164,7 @@ class miniReader(var rd : RData, var filenames : Map[(Int, String), String], var
   // START
   def run(input : Seq[(Int, Int)], ind : (Int, Int)) = { 
     val stuff = input
-    .flatMap(procReads)
+      .flatMap(procReads)
     stuff.foreach(kafkize)
     env.execute(s"Process BCL ${ind._1}/${ind._2}")
   }

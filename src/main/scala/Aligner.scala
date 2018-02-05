@@ -3,6 +3,7 @@ package bclconverter.aligner
 import com.typesafe.config.ConfigFactory
 import htsjdk.samtools.SAMRecord
 import java.util.concurrent.{Executors, TimeoutException}
+import java.util.Properties
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.runtime.state.filesystem.FsStateBackend
 import org.apache.flink.runtime.state.memory.MemoryStateBackend
@@ -18,6 +19,7 @@ import org.apache.flink.streaming.connectors.fs.bucketing.BucketingSink
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner
 import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer011, FlinkKafkaProducer011}
 import org.apache.flink.streaming.runtime.operators.windowing.TimestampedValue
+import org.apache.kafka.clients.admin._
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
 import org.slf4j.LoggerFactory
@@ -69,8 +71,21 @@ class miniAligner(pl : PList, ind : (Int, Int)) {
   // env.getCheckpointConfig.setMaxConcurrentCheckpoints(1)
   env.setStateBackend(new FsStateBackend(pl.stateBE, true))
   var jobs = List[(Int, String, String)]()
+  def createKTopic(topic : String) = {
+    val props = new Properties
+    props.setProperty(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, pl.kafkaServer)
+    val adminClient = AdminClient.create(props)
+    val newTopic = new NewTopic(topic, pl.kafkapar, 1)
+    try {
+      val fut = adminClient.createTopics(List(newTopic))
+      fut.all.get
+    } catch {
+      case _ : java.util.concurrent.ExecutionException => // topic already exists
+    }
+  }
   def sendAligned(x : (DataStream[SAMRecord], Int)) = {
     val name = pl.kafkaAligned + "-" + x._2.toString
+    createKTopic(name)
     val part : java.util.Optional[FlinkKafkaPartitioner[SAMRecord]] = java.util.Optional.of(new MyPartitioner[SAMRecord](pl.kafkapar))
     val kprod = new FlinkKafkaProducer011(
       name,

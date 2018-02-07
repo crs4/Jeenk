@@ -53,7 +53,8 @@ class PList(val param : ParameterTool) extends Serializable{
   val kafkaServer = param.get("kafkaServer", "127.0.0.1:9092")
   val kafkaTopic = param.get("kafkaTopic", "flink-prq")
   val kafkaAligned = param.get("kafkaAligned", "flink-aligned")
-  val kafkaControl = param.get("kafkaControl", "flink-con")
+  val kafkaControlPRQ = kafkaTopic + "-con"
+  val kafkaControlAL = kafkaAligned + "-con"
   val stateBE = param.getRequired("stateBE")
   val sref = param.getRequired("reference")
   val alignerTimeout = param.getInt("alignerTimeout", 0)
@@ -159,7 +160,7 @@ class Aligner(pl : PList) {
       }
       mw
     }
-    conProducer.send(new ProducerRecord(pl.kafkaControl, 1, toc.mkString("\n")))
+    conProducer.send(new ProducerRecord(pl.kafkaControlAL, 1, toc.mkString("\n")))
     val ids = filenames.keys.map(_.toInt)
     val g = ids.grouped(pl.agrouping).toArray
     val n = g.size
@@ -186,7 +187,7 @@ object runAligner {
     cp.put("auto.commit.interval.ms", "10000")
     val conConsumer = new KafkaConsumer[Int, String](cp)
     val rw = new Aligner(pl)
-    conConsumer.subscribe(List(pl.kafkaControl))
+    conConsumer.subscribe(List(pl.kafkaControlPRQ))
     var jobs = List[Future[Any]]()
     val startTime = java.time.Instant.now.getEpochSecond
     var goOn = true

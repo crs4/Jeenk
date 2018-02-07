@@ -46,7 +46,7 @@ class WList(val param : ParameterTool) extends Serializable {
   val wgrouping = param.getInt("wgrouping", 1)
   val kafkaServer = param.get("kafkaServer", "127.0.0.1:9092")
   val kafkaAligned = param.get("kafkaAligned", "flink-aligned")
-  val kafkaControl = param.get("kafkaControl", "flink-con")
+  val kafkaControl = kafkaAligned + "-con"
   val stateBE = param.getRequired("stateBE")
   val sref = param.getRequired("reference")
   val cramwriterTimeout = param.getInt("cramwriterTimeout", 0)

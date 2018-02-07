@@ -74,7 +74,7 @@ class RData(val param : ParameterTool) extends Serializable {
   val flinkpar = param.getInt("readerflinkpar", 1)
   val kafkaServer = param.get("kafkaServer", "127.0.0.1:9092")
   val kafkaTopic = param.get("kafkaTopic", "prq")
-  val kafkaControl = param.get("kafkaControl", "kcon")
+  val kafkaControl = kafkaTopic + "-con"
 }
 
 object Reader {

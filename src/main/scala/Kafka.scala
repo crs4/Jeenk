@@ -148,7 +148,7 @@ object MySDeserializer {
   val eos_tag = "EOS"
 }
 
-class MySDeserializer(val fpar : Int) extends DeserializationSchema[SAMRecord] {
+class MySDeserializer extends DeserializationSchema[SAMRecord] {
   override def getProducedType = TypeInformation.of(classOf[SAMRecord])
   override def isEndOfStream(el : SAMRecord) : Boolean = {
     if (el.getReadName != MySDeserializer.eos_tag)

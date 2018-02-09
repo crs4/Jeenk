@@ -84,7 +84,7 @@ class miniWriter(pl : WList, ind : (Int, Int)) {
     props.put("auto.offset.reset", "earliest")
     props.put("enable.auto.commit", "true")
     props.put("auto.commit.interval.ms", "10000")
-    val cons = new FlinkKafkaConsumer011[SAMRecord](topicname, new MySDeserializer(pl.kafkapar), props)
+    val cons = new FlinkKafkaConsumer011[SAMRecord](topicname, new MySDeserializer, props)
     val sam = env
       .addSource(cons)
       .setParallelism(pl.kafkapar)

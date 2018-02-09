@@ -26,6 +26,12 @@ import org.slf4j.LoggerFactory
 import scala.collection.JavaConversions._
 import scala.collection.mutable
 
+object CRAMWriter {
+  val refs = mutable.Map[String, ReferenceSource]()
+  def getRefSource(r : String) : ReferenceSource = {
+    refs.getOrElseUpdate(r, new ReferenceSource(NIOFileUtil.asPath(r)))
+  }
+}
 
 // Writer from SAMRecord to CRAM format
 class CRAMWriter(var ref : String) extends StreamWriterBase[SAMRecord] {
@@ -46,15 +52,10 @@ class CRAMWriter(var ref : String) extends StreamWriterBase[SAMRecord] {
     rec.setHeader(header)
     cramContainerStream.writeAlignment(rec)
   }
-  def createHeader = {
-    val conf = new HConf //HadoopFileSystem.getHadoopConfiguration
-    header = RapiAligner.getHeader(ref)
-    refSource = new ReferenceSource(NIOFileUtil.asPath(ref))
-  }
   override
   def open(fs : FileSystem, path : HPath) = {
-    if (header == null || refSource == null)
-      createHeader
+    header = RapiAligner.getHeader(ref)
+    refSource = CRAMWriter.getRefSource(ref)
     super.open(fs, path)
     cramContainerStream = new MyCRAMContainerStreamWriter(getStream, null, refSource, header, HADOOP_BAM_PART_ID)
     cramContainerStream.writeHeader(header)

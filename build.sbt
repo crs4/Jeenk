@@ -2,7 +2,7 @@ name := "bcl-converter"
 version := "0.1"
 scalaVersion := "2.11.11" // "2.10.5"
 
-val fver = "1.4.0" //"1.3.2" //"1.5-SNAPSHOT" 
+val fver = "1.4.2" //"1.3.2" //"1.5-SNAPSHOT" 
 
 // resolvers += Resolver.mavenLocal
 // resolvers += "apache-snapshot" at "https://repository.apache.org/content/repositories/snapshots/"
@@ -23,15 +23,15 @@ libraryDependencies ++= Seq(
 )
 
 excludeDependencies ++= Seq(
-  // SbtExclusionRule("", "") ,
-  SbtExclusionRule("org.apache.hadoop", "hadoop-yarn-api") ,
-  SbtExclusionRule("org.apache.hadoop", "hadoop-yarn-common") ,
-  SbtExclusionRule("org.apache.hadoop", "hadoop-yarn-client") ,
-  SbtExclusionRule("org.apache.hadoop", "hadoop-common") ,
-  SbtExclusionRule("org.apache.hadoop", "hadoop-hdfs") ,
-  SbtExclusionRule("org.apache.hadoop", "hadoop-annotations") ,
-  SbtExclusionRule("org.apache.hadoop", "hadoop-mapreduce-client-core") ,
-  SbtExclusionRule("stax", "stax-api")
+  // ExclusionRule("", "") ,
+  ExclusionRule("org.apache.hadoop", "hadoop-yarn-api") ,
+  ExclusionRule("org.apache.hadoop", "hadoop-yarn-common") ,
+  ExclusionRule("org.apache.hadoop", "hadoop-yarn-client") ,
+  ExclusionRule("org.apache.hadoop", "hadoop-common") ,
+  ExclusionRule("org.apache.hadoop", "hadoop-hdfs") ,
+  ExclusionRule("org.apache.hadoop", "hadoop-annotations") ,
+  ExclusionRule("org.apache.hadoop", "hadoop-mapreduce-client-core") ,
+  ExclusionRule("stax", "stax-api")
 )
 
 assemblyOption in assembly := (assemblyOption in assembly).value.copy(includeScala = false)

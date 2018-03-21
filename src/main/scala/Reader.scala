@@ -281,7 +281,7 @@ object runReader {
     val params = pfile.mergeWith(pargs)
 
     val numTasks = params.getInt("numReaders") // concurrent flink tasks to be run
-    kafkapar = params.getInt("kafkapar", kafkapar)
+    kafkapar = params.getInt("rkafkaout", kafkapar)
     implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
     // implicit val timeout = Timeout(30 seconds)
 

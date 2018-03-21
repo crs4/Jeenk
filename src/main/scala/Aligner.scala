@@ -47,7 +47,8 @@ class PList(val param : ParameterTool) extends Serializable{
   val root = param.getRequired("root")
   val rapiwin = param.getInt("rapiwin", 1024)
   val flinkpar = param.getInt("alignerflinkpar", 1)
-  val kafkapar = param.getInt("kafkapar", 1)
+  val kafkapar = param.getInt("akafkain", 1)
+  val kafkaparout = param.getInt("akafkaout", 1)
   val rapipar = param.getInt("rapipar", 1)
   val agrouping = param.getInt("agrouping", 1)
   val kafkaServer = param.get("kafkaServer", "127.0.0.1:9092")
@@ -76,7 +77,7 @@ class miniAligner(pl : PList, ind : (Int, Int)) {
     val props = new Properties
     props.setProperty(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, pl.kafkaServer)
     val adminClient = AdminClient.create(props)
-    val newTopic = new NewTopic(topic, pl.kafkapar, 1)
+    val newTopic = new NewTopic(topic, pl.kafkaparout, 1)
     try {
       val fut = adminClient.createTopics(List(newTopic))
       fut.all.get
@@ -87,7 +88,7 @@ class miniAligner(pl : PList, ind : (Int, Int)) {
   def sendAligned(x : (DataStream[SAMRecord], Int)) = {
     val name = pl.kafkaAligned + "-" + x._2.toString
     createKTopic(name)
-    val part : java.util.Optional[FlinkKafkaPartitioner[SAMRecord]] = java.util.Optional.of(new MyPartitioner[SAMRecord](pl.kafkapar))
+    val part : java.util.Optional[FlinkKafkaPartitioner[SAMRecord]] = java.util.Optional.of(new MyPartitioner[SAMRecord](pl.kafkaparout))
     val kprod = new FlinkKafkaProducer011(
       name,
       new MySSerializer,
@@ -125,9 +126,9 @@ class miniAligner(pl : PList, ind : (Int, Int)) {
     val name = pl.kafkaAligned + "-" + id.toString
     val eos  = new SAMRecord(null)
     eos.setReadName(MySDeserializer.eos_tag)
-    val EOS : DataStream[SAMRecord] = env.fromCollection(Array.fill(pl.kafkapar)(eos))
+    val EOS : DataStream[SAMRecord] = env.fromCollection(Array.fill(pl.kafkaparout)(eos))
     EOS.name("EOS")
-    val part : java.util.Optional[FlinkKafkaPartitioner[SAMRecord]] = java.util.Optional.of(new MyPartitioner[SAMRecord](pl.kafkapar))
+    val part : java.util.Optional[FlinkKafkaPartitioner[SAMRecord]] = java.util.Optional.of(new MyPartitioner[SAMRecord](pl.kafkaparout))
     val kprod = new FlinkKafkaProducer011(
       name,
       new MySSerializer,

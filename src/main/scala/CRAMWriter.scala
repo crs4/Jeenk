@@ -41,7 +41,7 @@ class WList(val param : ParameterTool) extends Serializable {
   val fout = param.getRequired("fout")
   val rapiwin = param.getInt("rapiwin", 1024)
   val crampar = param.getInt("crampar", 1)
-  val kafkapar = param.getInt("kafkapar", 1)
+  val kafkapar = param.getInt("wkafkain", 1)
   val rapipar = param.getInt("rapipar", 1)
   val wgrouping = param.getInt("wgrouping", 1)
   val kafkaServer = param.get("kafkaServer", "127.0.0.1:9092")

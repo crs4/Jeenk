@@ -147,7 +147,7 @@ class Flatter extends MapFunction[(Block, Block, Block), Block] {
   }
 }
 
-class readBCL(val rd : RData) extends FlatMapFunction[(Int, Int), (Block, Int, Block, Block)] with Serializable{
+class readBCL(val rd : Params) extends FlatMapFunction[(Int, Int), (Block, Int, Block, Block)] with Serializable{
   val newl = "\n".getBytes
   def flatMap(input : (Int, Int), out : Collector[(Block, Int, Block, Block)]) = {
     val (lane, tile) = input

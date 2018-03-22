@@ -57,24 +57,40 @@ class fuzzyIndex(sm : Map[(Int, String), String], mm : Int, undet : String) exte
   inds.foreach(k => seen += (k -> k._2))
 }
 
-class RData(val param : ParameterTool) extends Serializable {
+class Params(val param : ParameterTool) extends Serializable {
   var header : Block = Array()
   var ranges : Seq[Seq[Int]] = null
   var index : Seq[Seq[Int]] = null
   var fuz : fuzzyIndex = null
   // parameters
+  val adapter = param.get("adapter", null)
+  val aflinkpar = param.getInt("alignerflinkpar", 1)
+  val agrouping = param.getInt("agrouping", 1)
+  val alignerTimeout = param.getInt("alignerTimeout", 0)
+  val bdir = param.get("bdir", "Data/Intensities/BaseCalls/")
+  val bsize = param.getInt("bsize", 2048)
+  val crampar = param.getInt("crampar", 1)
+  val cramwriterTimeout = param.getInt("cramwriterTimeout", 0)
+  val fout = param.getRequired("fout")
+  val kafkaAligned = param.get("kafkaAligned", "flink-aligned")
+  val kafkaTopic = param.get("kafkaTopic", "flink-prq")
+  val kafkaControlAL = kafkaAligned + "-con"
+  val kafkaControlPRQ = kafkaTopic + "-con"
+  val kafkaServer = param.get("kafkaServer", "127.0.0.1:9092")
+  val kafkaparA = param.getInt("akafkain", 1)
+  val kafkaparW = param.getInt("wkafkain", 1)
+  val kafkaparout = param.getInt("akafkaout", 1)
+  val mismatches = param.getInt("mismatches", 1)
+  val rapipar = param.getInt("rapipar", 1)
+  val rapiwin = param.getInt("rapiwin", 1024)
+  val rflinkpar = param.getInt("readerflinkpar", 1)
+  val rgrouping = param.getInt("rgrouping", 1)
   val root = param.getRequired("root")
   val samplePath = param.get("sample-sheet", root + "SampleSheet.csv")
-  val bdir = param.get("bdir", "Data/Intensities/BaseCalls/")
-  val adapter = param.get("adapter", null)
-  val bsize = param.getInt("bsize", 2048)
-  val mismatches = param.getInt("mismatches", 1)
+  val sref = param.getRequired("reference")
+  val stateBE = param.getRequired("stateBE")
   val undet = param.get("undet", "Undetermined")
-  val rgrouping = param.getInt("rgrouping", 1)
-  val flinkpar = param.getInt("readerflinkpar", 1)
-  val kafkaServer = param.get("kafkaServer", "127.0.0.1:9092")
-  val kafkaTopic = param.get("kafkaTopic", "prq")
-  val kafkaControl = kafkaTopic + "-con"
+  val wgrouping = param.getInt("wgrouping", 1)
 }
 
 object Reader {
@@ -93,11 +109,11 @@ object Reader {
   }
 }
 
-class miniReader(var rd : RData, var filenames : Map[(Int, String), String], var f2id : Map[String, Int]) extends Serializable {
+class miniReader(var rd : Params, var filenames : Map[(Int, String), String], var f2id : Map[String, Int]) extends Serializable {
   // vars
   val env = StreamExecutionEnvironment.getExecutionEnvironment
   env.getConfig.setGlobalJobParameters(rd.param)
-  env.setParallelism(rd.flinkpar)
+  env.setParallelism(rd.rflinkpar)
   // serialization
   private def writeObject(out : java.io.ObjectOutputStream) {
     out.writeObject(rd)
@@ -105,7 +121,7 @@ class miniReader(var rd : RData, var filenames : Map[(Int, String), String], var
     out.writeObject(f2id)
   }
   private def readObject(in : java.io.ObjectInputStream){
-    rd = in.readObject.asInstanceOf[RData]
+    rd = in.readObject.asInstanceOf[Params]
     filenames = in.readObject.asInstanceOf[Map[(Int, String), String]]
     f2id = in.readObject.asInstanceOf[Map[String, Int]]
   }
@@ -171,7 +187,7 @@ class miniReader(var rd : RData, var filenames : Map[(Int, String), String], var
 }
 
 class Reader(val param : ParameterTool) {
-  val rd = new RData(param)
+  val rd = new Params(param)
   val conProducer = new KafkaProducer[Int, String](new ProdProps("conproducer11.", rd.kafkaServer))
   var sampleMap = Map[(Int, String), String]()
   var f2id = Map[String, Int]()
@@ -191,7 +207,7 @@ class Reader(val param : ParameterTool) {
     val fns = filenames.values.toArray
     f2id = fns.indices.map(i => (fns(i), i)).toMap
     val toclines = f2id.toArray.map{case (n, i) => s"$i $n"}
-    conProducer.send(new ProducerRecord(rd.kafkaControl, 0, toclines.mkString("\n")))
+    conProducer.send(new ProducerRecord(rd.kafkaControlPRQ, 0, toclines.mkString("\n")))
   }
   // send EOS to each kafka partition, for each topic
   def sendEOS = {

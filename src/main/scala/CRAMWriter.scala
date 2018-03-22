@@ -31,28 +31,12 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
 
 import bclconverter.kafka.{MySSerializer, MyPartitioner, ProdProps, ConsProps, MyDeserializer, MySDeserializer}
+import bclconverter.reader.Params
 import bclconverter.reader.Reader.{Block}
 import bclconverter.aligner.MyWaterMarker
 
 
-class WList(val param : ParameterTool) extends Serializable {
-  // parameters
-  val root = param.getRequired("root")
-  val fout = param.getRequired("fout")
-  val rapiwin = param.getInt("rapiwin", 1024)
-  val crampar = param.getInt("crampar", 1)
-  val kafkapar = param.getInt("wkafkain", 1)
-  val rapipar = param.getInt("rapipar", 1)
-  val wgrouping = param.getInt("wgrouping", 1)
-  val kafkaServer = param.get("kafkaServer", "127.0.0.1:9092")
-  val kafkaAligned = param.get("kafkaAligned", "flink-aligned")
-  val kafkaControl = kafkaAligned + "-con"
-  val stateBE = param.getRequired("stateBE")
-  val sref = param.getRequired("reference")
-  val cramwriterTimeout = param.getInt("cramwriterTimeout", 0)
-}
-
-class miniWriter(pl : WList, ind : (Int, Int)) {
+class miniWriter(pl : Params, ind : (Int, Int)) {
   // initialize stream environment
   var env = StreamExecutionEnvironment.getExecutionEnvironment
   env.getConfig.setGlobalJobParameters(pl.param)
@@ -87,7 +71,7 @@ class miniWriter(pl : WList, ind : (Int, Int)) {
     val cons = new FlinkKafkaConsumer011[SAMRecord](topicname, new MySDeserializer, props)
     val sam = env
       .addSource(cons)
-      .setParallelism(pl.kafkapar)
+      .setParallelism(pl.kafkaparW)
       .assignTimestampsAndWatermarks(new MyWaterMarker[SAMRecord])
       .name(topicname)
 
@@ -99,7 +83,7 @@ class miniWriter(pl : WList, ind : (Int, Int)) {
   }
 }
 
-class Writer(pl : WList) {
+class Writer(pl : Params) {
   def kafka2cram(toc : Array[String]) : Iterable[miniWriter] = {
     val filenames = toc
       .map(s => s.split(" ", 2))
@@ -131,7 +115,7 @@ object runWriter {
     implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
     // implicit val timeout = Timeout(30 seconds)
 
-    val pl = new WList(params)
+    val pl = new Params(params)
     val rg = new scala.util.Random
     val cp = new ConsProps("conconsumer11.", pl.kafkaServer)
     cp.put("auto.offset.reset", "earliest")
@@ -139,7 +123,7 @@ object runWriter {
     cp.put("auto.commit.interval.ms", "10000")
     val conConsumer = new KafkaConsumer[Int, String](cp)
     val rw = new Writer(pl)
-    conConsumer.subscribe(List(pl.kafkaControl))
+    conConsumer.subscribe(List(pl.kafkaControlAL))
     var jobs = List[Future[Any]]()
     val startTime = java.time.Instant.now.getEpochSecond
     var goOn = true

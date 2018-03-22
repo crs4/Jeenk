@@ -108,7 +108,7 @@ class PRQFlatter extends MapFunction[(Block, Block, Block, Block, Block), Block]
 }
 
 
-class PRQreadBCL(rd : RData) extends FlatMapFunction[(Int, Int), (Block, Block, Block, Block)] with Serializable{
+class PRQreadBCL(rd : Params) extends FlatMapFunction[(Int, Int), (Block, Block, Block, Block)] with Serializable{
   val newl = "\n".getBytes
   def flatMap(input : (Int, Int), out : Collector[(Block, Block, Block, Block)]) = {
     val (lane, tile) = input

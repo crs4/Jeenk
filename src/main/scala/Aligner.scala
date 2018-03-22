@@ -28,6 +28,7 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
 
 import bclconverter.reader.Reader.{Block, PRQData}
+import bclconverter.reader.Params
 import bclconverter.kafka.{MySSerializer, MyPartitioner, ProdProps, ConsProps, MyDeserializer, MySDeserializer}
 
 class MyWaterMarker[T] extends AssignerWithPeriodicWatermarks[T] {
@@ -42,30 +43,11 @@ class MyWaterMarker[T] extends AssignerWithPeriodicWatermarks[T] {
   }
 }
 
-class PList(val param : ParameterTool) extends Serializable{
-  // parameters
-  val root = param.getRequired("root")
-  val rapiwin = param.getInt("rapiwin", 1024)
-  val flinkpar = param.getInt("alignerflinkpar", 1)
-  val kafkapar = param.getInt("akafkain", 1)
-  val kafkaparout = param.getInt("akafkaout", 1)
-  val rapipar = param.getInt("rapipar", 1)
-  val agrouping = param.getInt("agrouping", 1)
-  val kafkaServer = param.get("kafkaServer", "127.0.0.1:9092")
-  val kafkaTopic = param.get("kafkaTopic", "flink-prq")
-  val kafkaAligned = param.get("kafkaAligned", "flink-aligned")
-  val kafkaControlPRQ = kafkaTopic + "-con"
-  val kafkaControlAL = kafkaAligned + "-con"
-  val stateBE = param.getRequired("stateBE")
-  val sref = param.getRequired("reference")
-  val alignerTimeout = param.getInt("alignerTimeout", 0)
-}
-
-class miniAligner(pl : PList, ind : (Int, Int)) {
+class miniAligner(pl : Params, ind : (Int, Int)) {
   // initialize stream environment
   var env = StreamExecutionEnvironment.getExecutionEnvironment
   env.getConfig.setGlobalJobParameters(pl.param)
-  env.setParallelism(pl.flinkpar)
+  env.setParallelism(pl.aflinkpar)
   env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
   // env.enableCheckpointing(30000)
   // env.getCheckpointConfig.setMinPauseBetweenCheckpoints(15000)
@@ -106,15 +88,15 @@ class miniAligner(pl : PList, ind : (Int, Int)) {
     props.put("auto.offset.reset", "earliest")
     props.put("enable.auto.commit", "true")
     props.put("auto.commit.interval.ms", "10000")
-    val cons = new FlinkKafkaConsumer011[(Int, PRQData)](topicname, new MyDeserializer(pl.flinkpar), props)
+    val cons = new FlinkKafkaConsumer011[(Int, PRQData)](topicname, new MyDeserializer(pl.aflinkpar), props)
     val ds = env
       .addSource(cons)
-      .setParallelism(pl.kafkapar)
+      .setParallelism(pl.kafkaparA)
       .assignTimestampsAndWatermarks(new MyWaterMarker[(Int, PRQData)])
       .name(topicname)
     val sam = ds
       .keyBy(_._1)
-      .timeWindow(Time.milliseconds(pl.rapiwin * pl.flinkpar / pl.kafkapar))
+      .timeWindow(Time.milliseconds(pl.rapiwin * pl.aflinkpar / pl.kafkaparA))
       .apply(new bclconverter.sam.PRQAligner[TimeWindow, Int](pl.sref, pl.rapipar))
 
     // send data to topic
@@ -146,7 +128,7 @@ class miniAligner(pl : PList, ind : (Int, Int)) {
   }
 }
 
-class Aligner(pl : PList) {
+class Aligner(pl : Params) {
   val conProducer = new KafkaProducer[Int, String](new ProdProps("conproducer11.", pl.kafkaServer))
   def kafkaAligner(toc : Array[String]) : Iterable[miniAligner] = {
     val filenames = toc
@@ -180,7 +162,7 @@ object runAligner {
     implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
     // implicit val timeout = Timeout(30 seconds)
 
-    val pl = new PList(params)
+    val pl = new Params(params)
     val rg = new scala.util.Random
     val cp = new ConsProps("conconsumer11.", pl.kafkaServer)
     cp.put("auto.offset.reset", "earliest")

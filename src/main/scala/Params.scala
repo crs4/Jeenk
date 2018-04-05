@@ -51,7 +51,7 @@ class Params(val param : ParameterTool) extends Serializable {
   // writer
   val numWriters = param.getInt("numWriters", wjobs)
   val crampar = Math.min(param.getInt("crampar", kafkaparout), kafkaparout)
-  val wgrouping = param.getInt("wgrouping", 3)
+  val wgrouping = param.getInt("wgrouping", 4)
   val cramwriterTimeout = param.getInt("cramwriterTimeout", 0)
   val kafkaServer = param.get("kafkaServer", "127.0.0.1:9092")
   val kafkaparW = param.getInt("wkafkain", crampar)

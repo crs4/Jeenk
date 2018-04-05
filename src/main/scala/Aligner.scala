@@ -27,8 +27,8 @@ import scala.collection.JavaConversions._
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
 
-import bclconverter.reader.Reader.{Block, PRQData}
-import bclconverter.reader.Params
+import bclconverter.conf.Params
+import bclconverter.conf.Params.{Block, PRQData}
 import bclconverter.kafka.{MySSerializer, MyPartitioner, ProdProps, ConsProps, MyDeserializer, MySDeserializer}
 
 class MyWaterMarker[T] extends AssignerWithPeriodicWatermarks[T] {
@@ -156,13 +156,11 @@ object runAligner {
     val pargs = ParameterTool.fromArgs(args)
     val propertiesFile = pargs.getRequired("properties")
     val pfile = ParameterTool.fromPropertiesFile(propertiesFile)
-    val params = pfile.mergeWith(pargs)
+    val pl = new Params(pfile.mergeWith(pargs))
 
-    val numTasks = params.getInt("numAligners") // concurrent flink tasks to be run
-    implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
+    implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(pl.numAligners))
     // implicit val timeout = Timeout(30 seconds)
 
-    val pl = new Params(params)
     val rg = new scala.util.Random
     val cp = new ConsProps("conconsumer11.", pl.kafkaServer)
     cp.put("auto.offset.reset", "earliest")

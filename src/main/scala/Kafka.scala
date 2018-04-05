@@ -23,7 +23,7 @@ import scala.concurrent.{ExecutionContext, Await, Future}
 import scala.io.Source
 import scala.xml.{XML, Node}
 
-import bclconverter.reader.Reader.{Block, PRQData}
+import bclconverter.conf.Params.{Block, PRQData}
 
 class MyKSerializer extends KeyedSerializationSchema[PRQData] {
   def toBytes(i : Int) : Array[Byte] = {

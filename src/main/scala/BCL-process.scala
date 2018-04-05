@@ -8,7 +8,8 @@ import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
 import org.apache.hadoop.io.compress.{CompressionCodecFactory, CompressionInputStream}
 
-import Reader.Block
+import bclconverter.conf.Params
+import bclconverter.conf.Params.Block
 
 class delAdapter(adapter : Block) extends MapFunction[(Block, Block, Block), (Block, Block, Block)] {
   val len = adapter.size
@@ -154,7 +155,7 @@ class readBCL(val rd : Params) extends FlatMapFunction[(Int, Int), (Block, Int, 
     val h1 = rd.header ++ s"${lane}:${tile}:".getBytes
     val h3 = rd.ranges.indices.map(rr => s" ${rr + 1}:N:".getBytes)
     val ldir = f"${rd.root}${rd.bdir}L${lane}%03d/"
-    val fs = Reader.MyFS(new HPath(ldir))
+    val fs = Params.MyFS(new HPath(ldir))
     def getDirs(range : Seq[Int]) : Array[HPath] = {
       range
         .map(x => s"$ldir/C$x.1/")
@@ -200,7 +201,7 @@ class readBCL(val rd : Params) extends FlatMapFunction[(Int, Int), (Block, Int, 
 }
 
 class BCLstream(flist : Array[HPath], bsize : Int) {
-  val fs = Reader.MyFS(flist.head)
+  val fs = Params.MyFS(flist.head)
   val ccf = new CompressionCodecFactory(new HConf)
   def fsOpen(path : HPath) : FSDataInputStream = {
     fs.open(path)
@@ -253,7 +254,7 @@ class BCLstream(flist : Array[HPath], bsize : Int) {
 }
 
 class Filter(path : HPath, bsize : Int) {
-  val fs = Reader.MyFS(path)
+  val fs = Params.MyFS(path)
   val filfile = fs.open(path)
   filfile.seek(12)
   val buf = new Array[Byte](bsize)
@@ -274,7 +275,7 @@ class Filter(path : HPath, bsize : Int) {
 }
 
 class Control(path : HPath, bsize : Int) {
-  val fs = Reader.MyFS(path)
+  val fs = Params.MyFS(path)
   val confile = fs.open(path)
   confile.seek(12)
   val buf = new Array[Byte](bsize)
@@ -299,7 +300,7 @@ class Control(path : HPath, bsize : Int) {
 }
 
 class Clocs(path : HPath) {
-  val fs = Reader.MyFS(path)
+  val fs = Params.MyFS(path)
   val locsfile = fs.open(path)
   locsfile.seek(1)
   val buf = new Array[Byte](4)
@@ -331,7 +332,7 @@ class Clocs(path : HPath) {
 }
 
 class Locs(path : HPath, bsize : Int) {
-  val fs = Reader.MyFS(path)
+  val fs = Params.MyFS(path)
   val locsfile = fs.open(path)
   locsfile.seek(12)
   val buf = new Array[Byte](bsize)

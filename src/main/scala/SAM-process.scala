@@ -1,6 +1,6 @@
 package bclconverter.sam
 
-import bclconverter.reader.Reader.{Block, PRQData}
+import bclconverter.conf.Params.{Block, PRQData}
 import com.typesafe.config.ConfigFactory
 import htsjdk.samtools.cram.ref.ReferenceSource
 import htsjdk.samtools.{SAMProgramRecord, SAMRecord, CigarOperator, Cigar, CigarElement, SAMFileHeader, SAMSequenceRecord, MyCRAMContainerStreamWriter}

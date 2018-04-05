@@ -21,9 +21,9 @@ import scala.collection.JavaConversions._
 import scala.io.Source
 import scala.xml.{XML, Node}
 
-import Reader.{Block, PRQData}
 import bclconverter.kafka.{MyKSerializer, MyPartitioner, ProdProps}
-
+import bclconverter.conf.Params
+import bclconverter.conf.Params.{Block, PRQData}
 
 class fuzzyIndex(sm : Map[(Int, String), String], mm : Int, undet : String) extends Serializable {
   def hamDist(a : String, b : String) : Int = {
@@ -57,57 +57,6 @@ class fuzzyIndex(sm : Map[(Int, String), String], mm : Int, undet : String) exte
   inds.foreach(k => seen += (k -> k._2))
 }
 
-class Params(val param : ParameterTool) extends Serializable {
-  var header : Block = Array()
-  var ranges : Seq[Seq[Int]] = null
-  var index : Seq[Seq[Int]] = null
-  var fuz : fuzzyIndex = null
-  // parameters
-  val adapter = param.get("adapter", null)
-  val aflinkpar = param.getInt("alignerflinkpar", 1)
-  val agrouping = param.getInt("agrouping", 1)
-  val alignerTimeout = param.getInt("alignerTimeout", 0)
-  val bdir = param.get("bdir", "Data/Intensities/BaseCalls/")
-  val bsize = param.getInt("bsize", 2048)
-  val crampar = param.getInt("crampar", 1)
-  val cramwriterTimeout = param.getInt("cramwriterTimeout", 0)
-  val fout = param.getRequired("fout")
-  val kafkaAligned = param.get("kafkaAligned", "flink-aligned")
-  val kafkaTopic = param.get("kafkaTopic", "flink-prq")
-  val kafkaControlAL = kafkaAligned + "-con"
-  val kafkaControlPRQ = kafkaTopic + "-con"
-  val kafkaServer = param.get("kafkaServer", "127.0.0.1:9092")
-  val kafkaparA = param.getInt("akafkain", 1)
-  val kafkaparW = param.getInt("wkafkain", 1)
-  val kafkaparout = param.getInt("akafkaout", 1)
-  val mismatches = param.getInt("mismatches", 1)
-  val rapipar = param.getInt("rapipar", 1)
-  val rapiwin = param.getInt("rapiwin", 1024)
-  val rflinkpar = param.getInt("readerflinkpar", 1)
-  val rgrouping = param.getInt("rgrouping", 1)
-  val root = param.getRequired("root")
-  val samplePath = param.get("sample-sheet", root + "SampleSheet.csv")
-  val sref = param.getRequired("reference")
-  val stateBE = param.getRequired("stateBE")
-  val undet = param.get("undet", "Undetermined")
-  val wgrouping = param.getInt("wgrouping", 1)
-}
-
-object Reader {
-  type Block = Array[Byte]
-  type PRQData = (Block, Block, Block, Block, Block)
-  def MyFS(path : HPath = null) : FileSystem = {
-    var fs : FileSystem = null
-    val conf = new HConf
-    if (path == null)
-      fs = FileSystem.get(conf)
-    else {
-      fs = FileSystem.get(path.toUri, conf);
-    }
-    // return the filesystem
-    fs
-  }
-}
 
 class miniReader(var rd : Params, var filenames : Map[(Int, String), String], var f2id : Map[String, Int]) extends Serializable {
   // vars
@@ -129,7 +78,7 @@ class miniReader(var rd : Params, var filenames : Map[(Int, String), String], va
     val props = new Properties
     props.setProperty(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, rd.kafkaServer)
     val adminClient = AdminClient.create(props)
-    val newTopic = new NewTopic(topic, runReader.kafkapar, 1)
+    val newTopic = new NewTopic(topic, rd.rkafkaout, 1)
     try {
       val fut = adminClient.createTopics(List(newTopic))
       fut.all.get
@@ -142,7 +91,7 @@ class miniReader(var rd : Params, var filenames : Map[(Int, String), String], va
     val key = x._2
     val name = rd.kafkaTopic + "-" + key.toString
     createKTopic(name)
-    val part : java.util.Optional[FlinkKafkaPartitioner[PRQData]] = java.util.Optional.of(new MyPartitioner[PRQData](runReader.kafkapar))
+    val part : java.util.Optional[FlinkKafkaPartitioner[PRQData]] = java.util.Optional.of(new MyPartitioner[PRQData](rd.rkafkaout))
     val kprod = new FlinkKafkaProducer011(
       name,
       new MyKSerializer,
@@ -186,8 +135,7 @@ class miniReader(var rd : Params, var filenames : Map[(Int, String), String], va
   }
 }
 
-class Reader(val param : ParameterTool) {
-  val rd = new Params(param)
+class Reader(val rd : Params) {
   val conProducer = new KafkaProducer[Int, String](new ProdProps("conproducer11.", rd.kafkaServer))
   var sampleMap = Map[(Int, String), String]()
   var f2id = Map[String, Int]()
@@ -215,10 +163,10 @@ class Reader(val param : ParameterTool) {
     env.setParallelism(1)
     val k : Block = Array(13)
     val eos : PRQData = (k, k, k, k, k)
-      val EOS : DataStream[PRQData] = env.fromCollection(Array.fill(runReader.kafkapar)(eos))
+      val EOS : DataStream[PRQData] = env.fromCollection(Array.fill(rd.rkafkaout)(eos))
     EOS.name("EOS")
     f2id.values.foreach{id =>
-      val part : java.util.Optional[FlinkKafkaPartitioner[PRQData]] = java.util.Optional.of(new MyPartitioner[PRQData](runReader.kafkapar))
+      val part : java.util.Optional[FlinkKafkaPartitioner[PRQData]] = java.util.Optional.of(new MyPartitioner[PRQData](rd.rkafkaout))
       val kprod = new FlinkKafkaProducer011(
 	rd.kafkaTopic + "-" + id.toString,
 	new MyKSerializer,
@@ -232,7 +180,7 @@ class Reader(val param : ParameterTool) {
   def readSampleNames = {
     // open SampleSheet.csv
     val path = new HPath(rd.samplePath)
-    val fs = Reader.MyFS(path)
+    val fs = Params.MyFS(path)
     val in = fs.open(path)
     val fsize = fs.getFileStatus(path).getLen
     val coso = Source.createBufferedSource(in).getLines.map(_.trim).toArray
@@ -254,7 +202,7 @@ class Reader(val param : ParameterTool) {
   def getAllJobs : Seq[(Int, Int)] = {
     // open runinfo.xml
     val xpath = new HPath(rd.root + "RunInfo.xml")
-    val fs = Reader.MyFS(xpath)
+    val fs = Params.MyFS(xpath)
     val xin = fs.open(xpath)
     val xsize = fs.getFileStatus(xpath).getLen
     val xbuf = new Array[Byte](xsize.toInt)
@@ -289,16 +237,13 @@ class Reader(val param : ParameterTool) {
 }
 
 object runReader {
-  var kafkapar = 1
   def main(args: Array[String]) {
     val pargs = ParameterTool.fromArgs(args)
     val propertiesFile = pargs.getRequired("properties")
     val pfile = ParameterTool.fromPropertiesFile(propertiesFile)
-    val params = pfile.mergeWith(pargs)
+    val params = new Params(pfile.mergeWith(pargs))
 
-    val numTasks = params.getInt("numReaders") // concurrent flink tasks to be run
-    kafkapar = params.getInt("rkafkaout", kafkapar)
-    implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
+    implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(params.numReaders))
     // implicit val timeout = Timeout(30 seconds)
 
     val reader = new Reader(params)

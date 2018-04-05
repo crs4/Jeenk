@@ -31,8 +31,8 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
 
 import bclconverter.kafka.{MySSerializer, MyPartitioner, ProdProps, ConsProps, MyDeserializer, MySDeserializer}
-import bclconverter.reader.Params
-import bclconverter.reader.Reader.{Block}
+import bclconverter.conf.Params
+import bclconverter.conf.Params.Block
 import bclconverter.aligner.MyWaterMarker
 
 
@@ -109,13 +109,11 @@ object runWriter {
     val pargs = ParameterTool.fromArgs(args)
     val propertiesFile = pargs.getRequired("properties")
     val pfile = ParameterTool.fromPropertiesFile(propertiesFile)
-    val params = pfile.mergeWith(pargs)
+    val pl = new Params(pfile.mergeWith(pargs))
 
-    val numTasks = params.getInt("numWriters") // concurrent flink tasks to be run
-    implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(numTasks))
+    implicit val ec = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(pl.numWriters))
     // implicit val timeout = Timeout(30 seconds)
 
-    val pl = new Params(params)
     val rg = new scala.util.Random
     val cp = new ConsProps("conconsumer11.", pl.kafkaServer)
     cp.put("auto.offset.reset", "earliest")

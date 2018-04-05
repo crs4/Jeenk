@@ -8,7 +8,8 @@ import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
 import org.apache.hadoop.io.compress.{CompressionCodecFactory, CompressionInputStream}
 
-import Reader.Block
+import bclconverter.conf.Params
+import bclconverter.conf.Params.Block
 
 
 class toPRQ extends MapFunction[(Block, Block, Block), (Block, Block, Block, Block, Block)] {
@@ -114,7 +115,7 @@ class PRQreadBCL(rd : Params) extends FlatMapFunction[(Int, Int), (Block, Block,
     val (lane, tile) = input
     val h1 = rd.header.drop(1) ++ s"${lane}:${tile}:".getBytes
     val ldir = f"${rd.root}${rd.bdir}L${lane}%03d/"
-    val fs = Reader.MyFS(new HPath(ldir))
+    val fs = Params.MyFS(new HPath(ldir))
     def getDirs(range : Seq[Int]) : Array[HPath] = {
       range
         .map(x => s"$ldir/C$x.1/")

@@ -29,6 +29,7 @@ import scala.collection.JavaConversions._
 import scala.collection.mutable.Map
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
+import scala.language.postfixOps
 
 import bclconverter.kafka.{MySSerializer, MyPartitioner, ProdProps, ConsProps, MyDeserializer, MySDeserializer}
 import bclconverter.conf.Params

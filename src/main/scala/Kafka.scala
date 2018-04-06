@@ -11,7 +11,8 @@ import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.extensions._
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer011
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner
-import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, KeyedDeserializationSchema, DeserializationSchema}
+import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, KeyedDeserializationSchema}
+import org.apache.flink.api.common.serialization.DeserializationSchema
 import org.apache.flink.util.MathUtils
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, Path => HPath}

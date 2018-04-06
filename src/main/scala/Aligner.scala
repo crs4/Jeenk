@@ -26,6 +26,7 @@ import org.slf4j.LoggerFactory
 import scala.collection.JavaConversions._
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
+import scala.language.postfixOps
 
 import bclconverter.conf.Params
 import bclconverter.conf.Params.{Block, PRQData}

@@ -208,7 +208,7 @@ class PRQAligner[W <: Window, Key](refPath : String, rapipar : Int) extends Rich
           out.setAlignmentStart(aln.getPos)
           out.setCigar(cigarRapiToHts(aln.getCigarOps))
           out.setMappingQuality(aln.getMapq)
-          out.setNotPrimaryAlignmentFlag(false)
+          out.setSecondaryAlignment(false)
           out.setSupplementaryAlignmentFlag(aln.getSecondaryAln)
           out.setProperPairFlag(read.getPropPaired)
           out.setReadNegativeStrandFlag(aln.getReverseStrand)

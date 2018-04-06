@@ -1,6 +1,7 @@
 name := "bcl-converter"
 version := "0.1"
 scalaVersion := "2.11.11" // "2.10.5"
+scalacOptions ++= Seq("unchecked", "-deprecation", "-feature")
 
 val fver = "1.4.2" //"1.3.2" //"1.5-SNAPSHOT" 
 

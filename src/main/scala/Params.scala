@@ -3,6 +3,7 @@ import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, Path => HPath}
 import bclconverter.reader.fuzzyIndex
+import scala.util.parsing.json.JSON
 import Params.{Block, PRQData}
 
 class Params(val param : ParameterTool) extends Serializable {
@@ -12,20 +13,26 @@ class Params(val param : ParameterTool) extends Serializable {
   var fuz : fuzzyIndex = null
   /// required parameters
   var root = param.getRequired("bcl_input_dir")
-  if (root.charAt(root.length - 1) != '/') root += "/"
+  if (!root.endsWith("/")) root += "/"
   var fout = param.getRequired("cram_output_dir")
-  if (fout.charAt(fout.length - 1) != '/') fout += "/"
+  if (!fout.endsWith("/")) fout += "/"
   val sref = param.getRequired("reference")
   val stateBE = param.getRequired("flink_tmp_dir")
+  // parameters of the flink cluster
+  val flserv = param.get("flink_server", "localhost:8081")
+  val url = s"http://${flserv}/overview"
+  val raw = scala.io.Source.fromURL(url).mkString
+  val mpar = JSON.parseFull(raw).get.asInstanceOf[Map[String, Any]]
+  val slots = mpar("slots-total").asInstanceOf[Double].toInt
+  val tasksmanagers = mpar("taskmanagers").asInstanceOf[Double].toInt
   /// recommended parameters
-  val numnodes = param.getInt("num_nodes", 1)
-  val corespernode = param.getInt("cores_per_node", 1)
-  val mempernode = param.getInt("mem_per_node", 8000)
+  val minmem = 12000
+  val numnodes = param.getInt("num_nodes", tasksmanagers)
+  val maxpar = param.getInt("cores_per_node", slots/tasksmanagers)
+  val mempernode = param.getInt("mem_per_node", minmem)
   /// other parameters
-  val par1 = param.getInt("par1", Math.min(mempernode/8000, corespernode))
-  val par2 = param.getInt("par2", Math.min(mempernode/10000, corespernode))
-  val meat = numnodes * par2
-  val wjobs = Math.min(4, meat / corespernode)
+  val par1 = param.getInt("par1", Math.min(mempernode/8000, maxpar))
+  val par2 = param.getInt("par2", Math.min(mempernode/minmem, maxpar))
   val kafkaServer = param.get("kafka_server", "127.0.0.1:9092")
   val kafkaTopic = param.get("kafka_prq", "flink-prq")
   val kafkaAligned = param.get("kafka_aligned", "flink-aligned")
@@ -34,7 +41,8 @@ class Params(val param : ParameterTool) extends Serializable {
   val samplePath = param.get("sample_sheet", root + "SampleSheet.csv")
   val adapter = param.get("adapter", null)
   val undet = param.get("undet", "Undetermined")
-  val bdir = param.get("base_dir", "Data/Intensities/BaseCalls/")
+  var bdir = param.get("base_dir", "Data/Intensities/BaseCalls/")
+  if (!bdir.endsWith("/")) bdir += "/"
   val bsize = param.getInt("block_size", 2048)
   val mismatches = param.getInt("mismatches", 1)
   // reader
@@ -47,9 +55,11 @@ class Params(val param : ParameterTool) extends Serializable {
   val aflinkpar = param.getInt("aligner_flinkpar", par1)
   val agrouping = param.getInt("aligner_grouping", 3)
   val alignerTimeout = param.getInt("aligner_timeout", 0)
-  val rapipar = param.getInt("rapi_par", (2*corespernode)/par1)
+  val rapipar = param.getInt("rapi_par", (2*maxpar)/par1)
   val rapiwin = param.getInt("rapi_win", 3360)
   val kafkaparA = param.getInt("aligner_kafka_fanin", 1)
+  val meat = numnodes * par2
+  val wjobs = Math.min(4, numnodes)
   val kafkaparout = param.getInt("aligner_kafka_fanout", meat / wjobs)
   // writer
   val numWriters = param.getInt("num_writers", wjobs)

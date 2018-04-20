@@ -1,3 +1,22 @@
+/*
+ * Copyright (c) 2018 CRS4
+ *
+ * This file is part of Jeenk.
+ *
+ * Jeenk is free software: you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Jeenk is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public
+ * License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Jeenk.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 package bclconverter.conf
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.hadoop.conf.{Configuration => HConf}
@@ -52,10 +71,10 @@ class Params(val param : ParameterTool) extends Serializable {
   val rkafkaout = param.getInt("reader_kafka_fanout", 1)
   // aligner
   val numAligners = param.getInt("num_aligners", numnodes)
-  val aflinkpar = param.getInt("aligner_flinkpar", par1)
+  val aflinkpar = param.getInt("aligner_flinkpar", 1)
   val agrouping = param.getInt("aligner_grouping", 3)
   val alignerTimeout = param.getInt("aligner_timeout", 0)
-  val rapipar = param.getInt("rapi_par", (2*maxpar)/par1)
+  val rapipar = param.getInt("rapi_par", maxpar / aflinkpar)
   val rapiwin = param.getInt("rapi_win", 3360)
   val kafkaparA = param.getInt("aligner_kafka_fanin", 1)
   val meat = numnodes * par2

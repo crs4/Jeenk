@@ -17,9 +17,9 @@
  * along with Jeenk.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package bclconverter.sam
+package it.crs4.jeenk.sam
 
-import bclconverter.conf.Params.{Block, PRQData}
+import it.crs4.jeenk.conf.Params.{Block, PRQData}
 import com.typesafe.config.ConfigFactory
 import htsjdk.samtools.cram.ref.ReferenceSource
 import htsjdk.samtools.{SAMProgramRecord, SAMRecord, CigarOperator, Cigar, CigarElement, SAMFileHeader, SAMSequenceRecord, MyCRAMContainerStreamWriter}

@@ -17,7 +17,7 @@
  * along with Jeenk.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package bclconverter.reader
+package it.crs4.jeenk.reader
 
 import annotation.tailrec
 import java.io._

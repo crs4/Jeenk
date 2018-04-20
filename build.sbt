@@ -1,13 +1,11 @@
-name := "bcl-converter"
+name := "Jeenk"
 version := "0.1"
-scalaVersion := "2.11.11" // "2.10.5"
+scalaVersion := "2.11.11"
 scalacOptions ++= Seq("unchecked", "-deprecation", "-feature")
 
-val fver = "1.4.2" //"1.3.2" //"1.5-SNAPSHOT" 
+val fver = "1.4.2" // "1.5-SNAPSHOT" 
 
-// resolvers += Resolver.mavenLocal
 // resolvers += "apache-snapshot" at "https://repository.apache.org/content/repositories/snapshots/"
-// resolvers += "apache-snapshot" at "https://repository.apache.org/content/repositories/releases/"
 
 libraryDependencies ++= Seq(
   // -------------------------------------

@@ -17,7 +17,7 @@
  * along with Jeenk.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package bclconverter.aligner
+package it.crs4.jeenk.aligner
 
 import org.apache.flink.api.common.state.{ListState, ListStateDescriptor}
 import org.apache.flink.api.java.utils.ParameterTool

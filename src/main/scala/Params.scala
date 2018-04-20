@@ -17,11 +17,11 @@
  * along with Jeenk.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package bclconverter.conf
+package it.crs4.jeenk.conf
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, Path => HPath}
-import bclconverter.reader.fuzzyIndex
+import it.crs4.jeenk.reader.fuzzyIndex
 import scala.util.parsing.json.JSON
 import Params.{Block, PRQData}
 
@@ -74,7 +74,7 @@ class Params(val param : ParameterTool) extends Serializable {
   val aflinkpar = param.getInt("aligner_flinkpar", 1)
   val agrouping = param.getInt("aligner_grouping", 3)
   val alignerTimeout = param.getInt("aligner_timeout", 0)
-  val rapipar = param.getInt("rapi_par", maxpar / aflinkpar)
+  val rapipar = param.getInt("rapi_par", Math.max(maxpar / aflinkpar, 1))
   val rapiwin = param.getInt("rapi_win", 3360)
   val kafkaparA = param.getInt("aligner_kafka_fanin", 1)
   val meat = numnodes * par2

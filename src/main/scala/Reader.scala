@@ -17,7 +17,7 @@
  * along with Jeenk.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package bclconverter.reader
+package it.crs4.jeenk.reader
 
 import com.typesafe.config.ConfigFactory
 import java.nio.ByteBuffer
@@ -40,9 +40,9 @@ import scala.collection.JavaConversions._
 import scala.io.Source
 import scala.xml.{XML, Node}
 
-import bclconverter.kafka.{MyKSerializer, MyPartitioner, ProdProps}
-import bclconverter.conf.Params
-import bclconverter.conf.Params.{Block, PRQData}
+import it.crs4.jeenk.kafka.{MyKSerializer, MyPartitioner, ProdProps}
+import it.crs4.jeenk.conf.Params
+import it.crs4.jeenk.conf.Params.{Block, PRQData}
 
 class fuzzyIndex(sm : Map[(Int, String), String], mm : Int, undet : String) extends Serializable {
   def hamDist(a : String, b : String) : Int = {

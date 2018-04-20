@@ -17,7 +17,7 @@
  * along with Jeenk.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package bclconverter.reader
+package it.crs4.jeenk.reader
 
 import java.nio.{ByteBuffer, ByteOrder}
 import org.apache.flink.api.common.functions.{MapFunction, FlatMapFunction, ReduceFunction, GroupReduceFunction}
@@ -27,8 +27,8 @@ import org.apache.hadoop.conf.{Configuration => HConf}
 import org.apache.hadoop.fs.{FileSystem, FSDataInputStream, FSDataOutputStream, Path => HPath}
 import org.apache.hadoop.io.compress.{CompressionCodecFactory, CompressionInputStream}
 
-import bclconverter.conf.Params
-import bclconverter.conf.Params.Block
+import it.crs4.jeenk.conf.Params
+import it.crs4.jeenk.conf.Params.Block
 
 class delAdapter(adapter : Block) extends MapFunction[(Block, Block, Block), (Block, Block, Block)] {
   val len = adapter.size

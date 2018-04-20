@@ -17,7 +17,7 @@
  * along with Jeenk.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package bclconverter.aligner
+package it.crs4.jeenk.aligner
 
 import com.typesafe.config.ConfigFactory
 import htsjdk.samtools.SAMRecord
@@ -47,9 +47,9 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
 import scala.language.postfixOps
 
-import bclconverter.conf.Params
-import bclconverter.conf.Params.{Block, PRQData}
-import bclconverter.kafka.{MySSerializer, MyPartitioner, ProdProps, ConsProps, MyDeserializer, MySDeserializer}
+import it.crs4.jeenk.conf.Params
+import it.crs4.jeenk.conf.Params.{Block, PRQData}
+import it.crs4.jeenk.kafka.{MySSerializer, MyPartitioner, ProdProps, ConsProps, MyDeserializer, MySDeserializer}
 
 class MyWaterMarker[T] extends AssignerWithPeriodicWatermarks[T] {
   var cur = 0l
@@ -117,7 +117,7 @@ class miniAligner(pl : Params, ind : (Int, Int)) {
     val sam = ds
       .keyBy(_._1)
       .timeWindow(Time.milliseconds(pl.rapiwin * pl.aflinkpar / pl.kafkaparA))
-      .apply(new bclconverter.sam.PRQAligner[TimeWindow, Int](pl.sref, pl.rapipar))
+      .apply(new it.crs4.jeenk.sam.PRQAligner[TimeWindow, Int](pl.sref, pl.rapipar))
 
     // send data to topic
     sendAligned(sam, id)

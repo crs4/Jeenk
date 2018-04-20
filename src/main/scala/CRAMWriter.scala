@@ -17,7 +17,7 @@
  * along with Jeenk.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package bclconverter.writer
+package it.crs4.jeenk.writer
 
 import com.typesafe.config.ConfigFactory
 import htsjdk.samtools.SAMRecord
@@ -50,10 +50,10 @@ import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Await, Future}
 import scala.language.postfixOps
 
-import bclconverter.kafka.{MySSerializer, MyPartitioner, ProdProps, ConsProps, MyDeserializer, MySDeserializer}
-import bclconverter.conf.Params
-import bclconverter.conf.Params.Block
-import bclconverter.aligner.MyWaterMarker
+import it.crs4.jeenk.kafka.{MySSerializer, MyPartitioner, ProdProps, ConsProps, MyDeserializer, MySDeserializer}
+import it.crs4.jeenk.conf.Params
+import it.crs4.jeenk.conf.Params.Block
+import it.crs4.jeenk.aligner.MyWaterMarker
 
 
 class miniWriter(pl : Params, ind : (Int, Int)) {
@@ -68,7 +68,7 @@ class miniWriter(pl : Params, ind : (Int, Int)) {
   env.setStateBackend(new FsStateBackend(pl.stateBE, true))
   var jobs = List[(Int, String, String)]()
   def writeToOF(x : (DataStream[SAMRecord], String)) = {
-    val wr = new bclconverter.sam.CRAMWriter(pl.sref)
+    val wr = new it.crs4.jeenk.sam.CRAMWriter(pl.sref)
     val fname = pl.fout + x._2 + ".cram"
     val bucket = new BucketingSink[SAMRecord](fname)
       .setWriter(wr)

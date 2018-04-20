@@ -17,7 +17,7 @@
  * along with Jeenk.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package bclconverter.kafka
+package it.crs4.jeenk.kafka
 
 import com.typesafe.config.ConfigFactory
 import htsjdk.samtools.SAMRecord
@@ -43,7 +43,7 @@ import scala.concurrent.{ExecutionContext, Await, Future}
 import scala.io.Source
 import scala.xml.{XML, Node}
 
-import bclconverter.conf.Params.{Block, PRQData}
+import it.crs4.jeenk.conf.Params.{Block, PRQData}
 
 class MyKSerializer extends KeyedSerializationSchema[PRQData] {
   def toBytes(i : Int) : Array[Byte] = {

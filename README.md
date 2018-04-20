@@ -6,15 +6,17 @@ Jeenk is a collection of parallel, distributed tools for genomics,
 written within the Apache Flink data streaming framework and using
 Apache Kafka for data movement.
 
-Currently, it consists of three tools:
+Currently it consists of three Flink-based tools:
 
-1. A reader, that converts the proprietary raw Illumina BCL files to
-   read-base data (FASTQ-like), which are sent to a Kafka broker for
-   storage and further processing.
-2. An aligner, that aligns the reads to a reference genome, using the
-   JRAPI library, which is powered by the standard BWA-MEM aligner.
-3. A CRAM writer, that writes the aligned reads as space-efficient
-   CRAM files.
+* A reader, that reads the proprietary raw Illumina BCL files directly
+  from the sequencer's run directory and converts them to read-based
+  data (FASTQ-like), which are sent to a Kafka broker for storage and
+  further processing (akin to Illumina's `bcl2fastq2`);
+* An aligner, that aligns the reads to a reference genome using the
+  BWA-MEM plugin through the RAPI library
+  (http://github.com/crs4/rapi/);
+* A CRAM writer, that writes the aligned reads as space-efficient CRAM
+  files.
 
 ## Compilation
 
@@ -26,8 +28,11 @@ the dependencies.
 
 ## Configuration
 
-A template configuration file, to be modified by the user, is provided
-as `conf/jeenk.conf`.
+A template configuration file is provided as `conf/jeenk.conf`. The
+file must be edited with the parameters of your Flink and Kafka
+configurations.
+
+To setup Flink and Kafka clusters, see the projects' documentation.
 
 ### BCL Reader
 

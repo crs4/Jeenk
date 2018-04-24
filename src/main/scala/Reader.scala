@@ -161,10 +161,10 @@ class Reader(val rd : Params) {
   var lanes = 0
   var filenames = Map[(Int, String), String]()
   def setFilenames = {
-    // Uncomment next lines if you want "Undetermined" reads in the output as well
-    // for (lane <- 1 to lanes){
-    //   filenames ++= Map((lane, rd.undet) -> new String(f"${rd.undet}"))
-    // }
+    // (Un)comment next lines if you (do not) want "Undetermined" reads in the output as well
+    for (lane <- 1 to lanes){
+      filenames ++= Map((lane, rd.undet) -> new String(f"${rd.undet}"))
+    }
     filenames ++= sampleMap
       .map {
       case (k, pref) => ((k._1, k._2) -> new String(f"${pref}"))
@@ -266,10 +266,10 @@ object runReader {
     // implicit val timeout = Timeout(30 seconds)
 
     val reader = new Reader(params)
+    val w = reader.getAllJobs
     reader.readSampleNames
     reader.sendTOC
 
-    val w = reader.getAllJobs
     val rgrouping = reader.rd.rgrouping
     val tasks = w.grouped(rgrouping).toArray
     val n = tasks.size

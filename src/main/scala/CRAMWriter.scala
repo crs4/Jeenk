@@ -37,7 +37,7 @@ import org.apache.flink.streaming.api.watermark.Watermark
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.streaming.api.windowing.triggers._
 import org.apache.flink.streaming.api.windowing.windows.{Window, TimeWindow, GlobalWindow}
-import org.apache.flink.streaming.connectors.fs.bucketing.BucketingSink
+import org.apache.flink.streaming.connectors.fs.bucketing.{BucketingSink, BasePathBucketer}
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer011
 import org.apache.flink.streaming.runtime.operators.windowing.TimestampedValue
 import org.apache.flink.streaming.util.serialization.{KeyedSerializationSchema, KeyedDeserializationSchema, DeserializationSchema}
@@ -54,7 +54,6 @@ import it.crs4.jeenk.kafka.{MySSerializer, MyPartitioner, ProdProps, ConsProps, 
 import it.crs4.jeenk.conf.Params
 import it.crs4.jeenk.conf.Params.Block
 import it.crs4.jeenk.aligner.MyWaterMarker
-
 
 class miniWriter(pl : Params, ind : (Int, Int)) {
   // initialize stream environment
@@ -73,6 +72,9 @@ class miniWriter(pl : Params, ind : (Int, Int)) {
     val bucket = new BucketingSink[SAMRecord](fname)
       .setWriter(wr)
       .setBatchSize(1024 * 1024 * 8)
+      .setPendingPrefix("")
+      .setPendingSuffix("")
+      .setBucketer(new BasePathBucketer)
       .setInactiveBucketCheckInterval(10000)
       .setInactiveBucketThreshold(10000)
     x._1

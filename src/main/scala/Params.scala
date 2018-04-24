@@ -50,7 +50,6 @@ class Params(val param : ParameterTool) extends Serializable {
   val maxpar = param.getInt("cores_per_node", slots/tasksmanagers)
   val mempernode = param.getInt("mem_per_node", minmem)
   /// other parameters
-  val par2 = param.getInt("par2", Math.min(mempernode/minmem, maxpar))
   val kafkaServer = param.get("kafka_server", "127.0.0.1:9092")
   val kafkaTopic = param.get("kafka_prq", "flink-prq")
   val kafkaAligned = param.get("kafka_aligned", "flink-aligned")
@@ -76,6 +75,7 @@ class Params(val param : ParameterTool) extends Serializable {
   val rapipar = param.getInt("rapi_par", Math.max(maxpar / aflinkpar, 1))
   val rapiwin = param.getInt("rapi_win", 3360)
   val kafkaparA = param.getInt("aligner_kafka_fanin", 1)
+  val par2 = param.getInt("par2", Math.min(mempernode/minmem, maxpar))
   val meat = numnodes * par2
   val wjobs = Math.min(4, numnodes)
   val kafkaparout = param.getInt("aligner_kafka_fanout", meat / wjobs)

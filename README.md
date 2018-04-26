@@ -32,24 +32,10 @@ A template configuration file is provided as `conf/jeenk.conf`. The
 file must be edited with the parameters of your Flink and Kafka
 configurations.
 
+See the [configuration guide](CONFIGURATION.md) for details on how to
+configure and run Jeenk tools.
+
 To setup Flink and Kafka clusters, see the projects' documentation.
-
-### BCL Reader
-
-```
-flink run -c it.crs4.jeenk.reader.runReader Jeenk-assembly-0.1.jar --properties conf/jeenk.conf
-```
-
-### Aligner
-
-```
-flink run -c it.crs4.jeenk.aligner.runAligner Jeenk-assembly-0.1.jar --properties conf/jeenk.conf
-```
-### CRAM Writer
-
-```
-flink run -c it.crs4.jeenk.writer.runWriter Jeenk-assembly-0.1.jar --properties conf/jeenk.conf
-```
 
 ## License
 

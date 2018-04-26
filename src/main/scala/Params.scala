@@ -74,17 +74,17 @@ class Params(val param : ParameterTool) extends Serializable {
   val alignerTimeout = param.getInt("aligner_timeout", 0)
   val rapipar = param.getInt("rapi_par", Math.max(maxpar / aflinkpar, 1))
   val rapiwin = param.getInt("rapi_win", 3360)
-  val kafkaparA = param.getInt("aligner_kafka_fanin", 1)
+  val kafkaparA = Math.min(param.getInt("aligner_kafka_fanin", 1), rkafkaout)
   val par2 = param.getInt("par2", Math.min(mempernode/minmem, maxpar))
   val meat = numnodes * par2
   val wjobs = Math.min(4, numnodes)
   val kafkaparout = param.getInt("aligner_kafka_fanout", meat / wjobs)
   // writer
   val numWriters = param.getInt("num_writers", wjobs)
-  val crampar = Math.min(param.getInt("writer_flinkpar", kafkaparout), kafkaparout)
+  val crampar = param.getInt("writer_flinkpar", kafkaparout)
+  val kafkaparW = Math.min(param.getInt("writer_kafka_fanin", crampar), kafkaparout)
   val wgrouping = param.getInt("writer_grouping", 4)
   val cramwriterTimeout = param.getInt("writer_timeout", 0)
-  val kafkaparW = param.getInt("writer_kafka_fanin", crampar)
 }
 
 object Params {

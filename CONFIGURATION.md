@@ -84,7 +84,17 @@ The parameters regarding Kafka are:
 - `kafka_aligned` : the prefix of the topics which will contain the
   aligned data. **Default:** flink-aligned
 
-## BCL Reader
+When having Kafka distributed on many nodes/disks it is good practice
+to try and and spread the data uniformly among the disks. For this to
+happen, the number of partitions of the Kafka topics should be equal
+to (or a multiple of) the total number of disks used by the Kafka
+server (e.g., if Kafka is ditributed on 3 nodes and using 2 disks per
+node, one could choose to use 6 or 12 partitions per topic). Jeenk's
+reader and aligner allow to choose the number of partitions by setting
+the `reader_kafka_fanout` and `aligner_kafka_fanout` options (see
+below).
+
+## BCL reader
 
 The reader takes care of converting the proprietary raw Illumina BCL
 files directly from the sequencer's run directory into read-based data
@@ -100,7 +110,7 @@ The parameters which affect the BCL reader are:
   Flink job. The default ensures a minimum of 8GB per
   subtask. **Default:** min(`mem_per_node`/8000, `cores_per_node`)
 - `reader_kafka_fanout` : Number of partitions per each output Kafka
-  topic. Increase if you need more bandwidth. **Default:** 1
+  topic. Increase if needed. **Default:** 1
 - `sample_sheet` : Location of the sample sheet. **Default:**
   `bcl_input_dir` + `SampleSheet.csv`
 - `adapter` : Adapter to be trimmed (if present). **Default:** ""
@@ -118,7 +128,7 @@ the maximum number of allowed user processes in the system (e.g.,
 `ulimit -u 65536`). If you want to limit the number of threads, you
 can decrease the `reader_grouping` parameter.
 
-### Running the Reader
+### Running the reader
 
 ```
 flink run -c it.crs4.jeenk.reader.runReader Jeenk-assembly-0.1.jar --properties conf/jeenk.conf
@@ -148,7 +158,7 @@ parallelism of the RAPI library.
 - `maxpar` : Maximum parallelism for the writing phase. **Default:**
   min(mem_per_node/12000, cores_per_node)
 - `aligner_kafka_fanout` : Number of partitions per each output Kafka
-  topic. Increase if you need more bandwidth. **Default:** num_nodes *
+  topic. Increase if needed. **Default:** num_nodes *
   maxpar / min(4, num_nodes * maxpar / cores_per_node)
 - `aligner_timeout` : If the aligner does not detect new data within
   `aligner_timeout` seconds it will exit. If set to 0 it waits
@@ -165,13 +175,13 @@ Taskmanagers per node, each using 10 GB of RAM, and run the aligner
 with parameters `numAligners = 16` and `aligner_flinkpar = 6`,
 boosting the performance by a factor 6.
 
-### Running the Aligner
+### Running the aligner
 
 ```
 flink run -c it.crs4.jeenk.aligner.runAligner Jeenk-assembly-0.1.jar --properties conf/jeenk.conf
 ```
 
-## CRAM Writer
+## CRAM writer
 
 This tools writes the aligned reads as space-efficient CRAM files.
 
@@ -189,7 +199,7 @@ This tools writes the aligned reads as space-efficient CRAM files.
   `writer_timeout` seconds it will exit. If set to 0 it waits
   indefinitely. **Default:** 0
 
-### Running the CRAM Writer
+### Running the CRAM writer
 
 ```
 flink run -c it.crs4.jeenk.writer.runWriter Jeenk-assembly-0.1.jar --properties conf/jeenk.conf

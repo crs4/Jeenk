@@ -48,3 +48,18 @@ See COPYING for further details.
 
 For alternative licensing arrangements send inquiries to Gianluigi
 Zanetti <gianluigi.zanetti@crs4.it>
+
+## Further Reading
+
+- F. Versaci, L. Pireddu and G. Zanetti, *Kafka interfaces for
+  composable streaming genomics pipelines,* 2018 IEEE EMBS
+  International Conference on Biomedical & Health Informatics (BHI),
+  Las Vegas, NV, USA, 2018, pp. 259-262.  doi:10.1109/BHI.2018.8333418
+  [URL](http://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8333418&isnumber=8333343)
+
+- F. Versaci, L. Pireddu and G. Zanetti, *Scalable genomics: From raw
+  data to aligned reads on Apache YARN,* 2016 IEEE International
+  Conference on Big Data (Big Data), Washington, DC, 2016,
+  pp. 1232-1241.  doi:10.1109/BigData.2016.7840727
+  [URL](http://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=7840727&isnumber=7840573)
+

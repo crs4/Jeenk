@@ -45,7 +45,7 @@ Jeenk expects the following mandatory parameters:
 - `reference` : Path to reference file. It must be local in all nodes
   and specified with just the path (i.e., `/tmp/ref/some.fasta`)
 - `flink_tmp_dir` : Temp directory for the Flink State Backend, can be
-  either local or on hdfs.
+  either local or on HDFS.
 
 ### General parameters
 
@@ -157,7 +157,7 @@ parallelism of the RAPI library.
 **Note:** Currently, the RAPI library is *not* thread-safe and hence
 calls to it are *synchronized*, to prevent thread interference. Thus
 we recommend to run one aligning Flink job per Taskmanager, since more
-jobs will not improve the performance. Howevere, if running on
+jobs will not improve the performance. However, if running on
 machines with large memory it is possible to have multiple
 Taskmanagers running on the same node. For example, if running on 16
 nodes, each with 60 GB of RAM available to Flink, we could run 6

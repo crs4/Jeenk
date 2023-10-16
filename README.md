@@ -20,6 +20,8 @@ Currently it consists of three Flink-based tools:
 
 ## Compilation
 
+This software has been tested with Apache Flink 1.4 and Java 8.
+
 To compile just run `sbt clean assembly`, which will create a
 `Jeenk-assembly-X.Y.jar` file, to be fed to the Flink server.
 
